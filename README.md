@@ -83,6 +83,11 @@ The Supabase schema (tables `profiles`, `time_entries`, `timekeeping_requests`,
 published there and should already exist in your project. Column mappings used by
 this API match it exactly.
 
+For a quick local demo, run [`seed.sql`](seed.sql) after the schema — it creates
+5 Auth users (demo password `PinoyRide123!`), matching profiles, time entries for
+the current week, and a few pending/approved/rejected requests so the approver
+and HR admin views have data to show.
+
 ## Deploying to Render
 
 1. Push this folder to a git repo and create a **new Blueprint** from `render.yaml`
