@@ -125,6 +125,41 @@ public class ClockController : ControllerBase
         return Ok(row);
     }
 
+    /// <summary>POST /api/clock/reset-today — dev-only: delete today's entry so the user can re-clock.</summary>
+    [HttpPost("reset-today")]
+    public async Task<IActionResult> ResetToday()
+    {
+        var uid = CurrentUserId();
+        var today = PhClock.Today;
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var existing = await con.QuerySingleOrDefaultAsync<TimeEntry>(
+            """
+            select id, user_id, work_date, time_in, time_out,
+                   source::text as source, status::text as status, work_setup::text as work_setup
+            from time_entries
+            where user_id = @Uid::uuid and work_date = @Date
+            """,
+            new { Uid = uid, Date = today }, tx);
+
+        if (existing is null)
+        {
+            return Ok(new { message = "No entry for today." });
+        }
+
+        await con.ExecuteAsync(
+            "delete from time_entries where id = @Id",
+            new { Id = existing.Id }, tx);
+
+        await _audit.AddAsync(con, tx, uid, "reset_today", "time_entries", existing.Id.ToString(),
+            new { work_date = today });
+
+        tx.Commit();
+        return Ok(new { message = "Today's entry has been reset." });
+    }
+
     /// <summary>GET /api/clock/today — today's entry plus the current week for this user.</summary>
     [HttpGet("today")]
     public async Task<IActionResult> Today()
