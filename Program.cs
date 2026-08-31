@@ -66,6 +66,7 @@ builder.Services.AddSingleton(new SupabaseOptions
 builder.Services.AddScoped<Db>();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<PayrollService>();
 builder.Services.AddHttpClient<SupabaseAuthClient>();
 builder.Services.AddHttpClient<SupabaseAdminClient>();
 
@@ -134,6 +135,23 @@ Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
 DapperTypeHandlers.Register();
 
 var app = builder.Build();
+
+// Apply idempotent schema additions (profiles.basic_salary) so existing
+// databases gain the payroll columns without a manual SQL-editor step.
+// Failures are logged but do not stop the API; the payroll endpoints would
+// surface the underlying problem instead.
+try
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<Db>();
+        await db.EnsureAdditionsAsync();
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Could not apply schema additions (profiles.basic_salary).");
+}
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors("Frontend");

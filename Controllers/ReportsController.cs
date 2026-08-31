@@ -79,7 +79,7 @@ public class ReportsController : ControllerBase
     private async Task<IEnumerable<TimeEntry>> QueryEntriesAsync(NpgsqlConnection con, DateOnly from, DateOnly to, Guid? staffId)
     {
         var sql = """
-            select te.id, te.user_id, te.work_date, te.time_in, te.time_out, te.source, te.status,
+            select te.id, te.user_id, te.work_date, te.time_in, te.time_out, te.source, te.status, te.work_setup::text as work_setup,
                    p.full_name, p.email
             from time_entries te
             join profiles p on p.id = te.user_id
@@ -160,7 +160,7 @@ public class ReportsController : ControllerBase
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("SECTION,WorkDate,Employee,Email,TimeIn,TimeOut,Source,Status,Hours,RequestType,RequestedTimeIn,RequestedTimeOut,Reason,ApproverNotes,ResolvedAt");
+        sb.AppendLine("SECTION,WorkDate,Employee,Email,TimeIn,TimeOut,Source,Status,Hours,RequestType,RequestedTimeIn,RequestedTimeOut,Reason,ApproverNotes,ResolvedAt,Setup");
 
         foreach (var e in entries)
         {
@@ -173,6 +173,8 @@ public class ReportsController : ControllerBase
               .Append(Csv(e.Source)).Append(',')
               .Append(Csv(e.Status)).Append(',')
               .Append(Csv(e.Hours?.ToString("0.00")))
+              .Append(',')
+              .Append(Csv(e.WorkSetup))
               .AppendLine();
         }
 
@@ -191,6 +193,7 @@ public class ReportsController : ControllerBase
               .Append(Csv(r.Reason)).Append(',')
               .Append(Csv(r.ApproverNotes)).Append(',')
               .Append(Csv(r.ResolvedAt?.ToString("yyyy-MM-dd HH:mm")))
+              .Append(',')
               .AppendLine();
         }
 

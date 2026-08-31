@@ -25,6 +25,9 @@ begin
   if not exists (select 1 from pg_type where typname = 'entry_status') then
     create type entry_status as enum ('confirmed', 'pending');
   end if;
+  if not exists (select 1 from pg_type where typname = 'work_setup') then
+    create type work_setup as enum ('office', 'wfh');
+  end if;
   if not exists (select 1 from pg_type where typname = 'request_type') then
     create type request_type as enum ('adjustment', 'leave', 'overtime', 'other');
   end if;
@@ -35,16 +38,21 @@ end $$;
 
 -- ---- profiles --------------------------------------------------------------
 create table if not exists public.profiles (
-  id          uuid primary key references auth.users (id) on delete cascade,
-  email       text,
-  full_name   text not null,
-  department  text,
-  position    text,
-  role        public.user_role   not null default 'employee',
-  status      public.user_status not null default 'active',
-  approver_id uuid references public.profiles (id),
-  created_at  timestamptz not null default now()
+  id           uuid primary key references auth.users (id) on delete cascade,
+  email        text,
+  full_name    text not null,
+  department   text,
+  position     text,
+  role         public.user_role   not null default 'employee',
+  status       public.user_status not null default 'active',
+  approver_id  uuid references public.profiles (id),
+  basic_salary numeric(12,2),
+  created_at   timestamptz not null default now()
 );
+
+-- Payroll: monthly basic salary. Idempotent so databases created before this
+-- column existed gain it when schema.sql is re-run.
+alter table public.profiles add column if not exists basic_salary numeric(12,2);
 
 create index if not exists profiles_approver_id_idx on public.profiles (approver_id);
 create index if not exists profiles_role_idx        on public.profiles (role);
@@ -58,10 +66,14 @@ create table if not exists public.time_entries (
   time_out   timestamptz,
   source     public.entry_source  not null default 'self_logged',
   status     public.entry_status  not null default 'confirmed',
+  work_setup public.work_setup    not null default 'office',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint time_entries_user_date_key unique (user_id, work_date)
 );
+
+-- Work location for the day (added for the payroll module; idempotent).
+alter table public.time_entries add column if not exists work_setup work_setup not null default 'office';
 
 create index if not exists time_entries_user_date_idx   on public.time_entries (user_id, work_date);
 create index if not exists time_entries_work_date_idx   on public.time_entries (work_date);

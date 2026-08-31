@@ -13,6 +13,11 @@ public class LoginResponse
     public string? FullName { get; set; }
 }
 
+public class ClockInRequest
+{
+    public string? WorkSetup { get; set; }
+}
+
 public class CreateRequestRequest
 {
     public string? WorkDate { get; set; }
@@ -36,6 +41,7 @@ public class CreateStaffRequest
     public string? Position { get; set; }
     public string? Role { get; set; }
     public Guid? ApproverId { get; set; }
+    public decimal? BasicSalary { get; set; }
 }
 
 public class UpdateStaffRequest
@@ -44,4 +50,5 @@ public class UpdateStaffRequest
     public string? Position { get; set; }
     public string? Role { get; set; }
     public Guid? ApproverId { get; set; }
+    public decimal? BasicSalary { get; set; }
 }

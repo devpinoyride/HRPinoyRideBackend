@@ -10,6 +10,7 @@ public class Profile
     public string? Role { get; set; }
     public string? Status { get; set; }
     public Guid? ApproverId { get; set; }
+    public decimal? BasicSalary { get; set; }
     public string? ApproverName { get; set; }
     public DateTime? CreatedAt { get; set; }
 }
@@ -23,6 +24,7 @@ public class TimeEntry
     public DateTime? TimeOut { get; set; }
     public string? Source { get; set; }
     public string? Status { get; set; }
+    public string? WorkSetup { get; set; }
     public string? FullName { get; set; }
     public string? Email { get; set; }
     public double? Hours { get; set; }
@@ -55,4 +57,72 @@ public class AuditLog
     public string? RecordId { get; set; }
     public string? DetailsJson { get; set; }
     public DateTime? CreatedAt { get; set; }
+}
+
+// ---- Payroll (semi-monthly cutoffs: 11–25 and 26–10) ------------------------
+
+public class PayrollPeriod
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public int Cutoff { get; set; }     // 1 = 11–25, 2 = 26–10 (next month)
+    public DateOnly Start { get; set; }
+    public DateOnly End { get; set; }
+}
+
+public class PayrollDayDetail
+{
+    public DateOnly Date { get; set; }
+    public string? Weekday { get; set; }
+    public string? Status { get; set; } // present | paid_leave | absent | upcoming
+    public DateTime? TimeIn { get; set; }
+    public DateTime? TimeOut { get; set; }
+    public string? Source { get; set; }
+    public string? WorkSetup { get; set; }
+    public double? Hours { get; set; }
+    public double? OvertimeHours { get; set; }
+}
+
+public class PayrollComputation
+{
+    public decimal BasicSalary { get; set; }
+    public decimal DailyRate { get; set; }
+    public decimal SemiMonthlyBasic { get; set; }
+    public int Workdays { get; set; }
+    public int WorkedDays { get; set; }
+    public int PaidLeaveDays { get; set; }
+    public int AbsentDays { get; set; }
+    public decimal AbsenceDeduction { get; set; }
+    public double OvertimeHours { get; set; }
+    public decimal OvertimePay { get; set; }
+    public decimal NetPay { get; set; }
+}
+
+public class PayrollPayslip
+{
+    public Profile Staff { get; set; } = null!;
+    public PayrollPeriod Period { get; set; } = null!;
+    public List<PayrollDayDetail> Days { get; set; } = new();
+    public PayrollComputation? Computation { get; set; }
+}
+
+public class PayrollSummaryRow
+{
+    public Guid StaffId { get; set; }
+    public string? FullName { get; set; }
+    public string? Department { get; set; }
+    public string? Position { get; set; }
+    public string? Role { get; set; }
+    public string? Status { get; set; }
+    public decimal? BasicSalary { get; set; }
+    public int Workdays { get; set; }
+    public int WorkedDays { get; set; }
+    public int PaidLeaveDays { get; set; }
+    public int AbsentDays { get; set; }
+    public decimal? DailyRate { get; set; }
+    public decimal? SemiMonthlyBasic { get; set; }
+    public decimal? AbsenceDeduction { get; set; }
+    public double OvertimeHours { get; set; }
+    public decimal? OvertimePay { get; set; }
+    public decimal? NetPay { get; set; }
 }

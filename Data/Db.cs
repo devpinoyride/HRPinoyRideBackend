@@ -1,3 +1,4 @@
+using Dapper;
 using Npgsql;
 using PinoyRideHrApi.Infrastructure;
 
@@ -22,5 +23,31 @@ public class Db
         var con = new NpgsqlConnection(_connectionString);
         con.Open();
         return con;
+    }
+
+    /// <summary>
+    /// Idempotent schema additions for databases created before a feature
+    /// shipped. schema.sql remains the full reference; this keeps existing
+    /// databases current without a manual SQL-editor step.
+    /// </summary>
+    public async Task EnsureAdditionsAsync()
+    {
+        using var con = Open();
+        await con.ExecuteAsync(
+            """
+            alter table public.profiles
+                add column if not exists basic_salary numeric(12, 2);
+
+            do $$
+            begin
+              if not exists (select 1 from pg_type where typname = 'work_setup') then
+                create type public.work_setup as enum ('office', 'wfh');
+              end if;
+            end
+            $$;
+
+            alter table public.time_entries
+                add column if not exists work_setup public.work_setup not null default 'office';
+            """);
     }
 }

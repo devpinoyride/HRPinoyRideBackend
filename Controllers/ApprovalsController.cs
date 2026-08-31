@@ -119,7 +119,9 @@ public class ApprovalsController : ControllerBase
                 source = 'adjusted',
                 status = 'confirmed',
                 updated_at = now()
-            returning *
+            returning id, user_id, work_date, time_in, time_out,
+                      source::text as source, status::text as status, work_setup::text as work_setup,
+                      created_at, updated_at
             """,
             new
             {

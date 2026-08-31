@@ -33,17 +33,25 @@ public class ClockController : ControllerBase
 
     /// <summary>POST /api/clock/in — upsert today's entry (insert when missing).</summary>
     [HttpPost("in")]
-    public async Task<IActionResult> ClockIn()
+    public async Task<IActionResult> ClockIn([FromBody] ClockInRequest? request)
     {
         var uid = CurrentUserId();
         var today = PhClock.Today;
+
+        var setup = (request?.WorkSetup ?? "office").Trim().ToLowerInvariant();
+        if (setup is not ("office" or "wfh"))
+        {
+            return StatusCode(422, new { error = "workSetup must be 'office' or 'wfh'." });
+        }
 
         using var con = _db.Open();
         using var tx = con.BeginTransaction();
 
         var existing = await con.QuerySingleOrDefaultAsync<TimeEntry>(
             """
-            select * from time_entries
+            select id, user_id, work_date, time_in, time_out,
+                   source::text as source, status::text as status, work_setup::text as work_setup
+            from time_entries
             where user_id = @Uid::uuid and work_date = @Date
             """,
             new { Uid = uid, Date = today }, tx);
@@ -55,11 +63,13 @@ public class ClockController : ControllerBase
 
         var row = await con.QuerySingleAsync<TimeEntry>(
             """
-            insert into time_entries (user_id, work_date, time_in, source, status)
-            values (@Uid::uuid, @Date, @Now, 'self_logged', 'confirmed')
-            returning *
+            insert into time_entries (user_id, work_date, time_in, source, status, work_setup)
+            values (@Uid::uuid, @Date, @Now, 'self_logged', 'confirmed', @Setup::work_setup)
+            returning id, user_id, work_date, time_in, time_out,
+                      source::text as source, status::text as status, work_setup::text as work_setup,
+                      created_at, updated_at
             """,
-            new { Uid = uid, Date = today, Now = DateTime.UtcNow }, tx);
+            new { Uid = uid, Date = today, Now = DateTime.UtcNow, Setup = setup }, tx);
 
         await _audit.AddAsync(con, tx, uid, "clock_in", "time_entries", row.Id.ToString(),
             new { user_id = uid, work_date = today, time_in = row.TimeIn });
@@ -80,7 +90,9 @@ public class ClockController : ControllerBase
 
         var row = await con.QuerySingleOrDefaultAsync<TimeEntry>(
             """
-            select * from time_entries
+            select id, user_id, work_date, time_in, time_out,
+                   source::text as source, status::text as status, work_setup::text as work_setup
+            from time_entries
             where user_id = @Uid::uuid and work_date = @Date
             """,
             new { Uid = uid, Date = today }, tx);
@@ -100,7 +112,9 @@ public class ClockController : ControllerBase
             update time_entries
             set time_out = @Now, updated_at = now()
             where id = @Id
-            returning *
+            returning id, user_id, work_date, time_in, time_out,
+                      source::text as source, status::text as status, work_setup::text as work_setup,
+                      created_at, updated_at
             """,
             new { Now = DateTime.UtcNow, Id = row.Id }, tx);
 

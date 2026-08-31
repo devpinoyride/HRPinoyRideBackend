@@ -44,7 +44,7 @@ public class StaffController : ControllerBase
     {
         var sql = """
             select p.id, p.email, p.full_name, p.department, p.position, p.role, p.status,
-                   p.approver_id, a.full_name as approver_name, p.created_at
+                   p.approver_id, p.basic_salary, a.full_name as approver_name, p.created_at
             from profiles p
             left join profiles a on a.id = p.approver_id
             where 1 = 1
@@ -116,8 +116,8 @@ public class StaffController : ControllerBase
         {
             row = await con.QuerySingleAsync<Profile>(
                 """
-                insert into profiles (id, email, full_name, department, position, role, status, approver_id)
-                values (@Id::uuid, @Email, @FullName, @Department, @Position, @Role::user_role, 'active', @ApproverId::uuid)
+                insert into profiles (id, email, full_name, department, position, role, status, approver_id, basic_salary)
+                values (@Id::uuid, @Email, @FullName, @Department, @Position, @Role::user_role, 'active', @ApproverId::uuid, @BasicSalary)
                 returning *
                 """,
                 new
@@ -128,7 +128,8 @@ public class StaffController : ControllerBase
                     Department = request.Department?.Trim(),
                     Position = request.Position?.Trim(),
                     Role = role,
-                    ApproverId = request.ApproverId
+                    ApproverId = request.ApproverId,
+                    BasicSalary = request.BasicSalary
                 }, tx);
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -177,8 +178,9 @@ public class StaffController : ControllerBase
             update profiles
             set department = @Department,
                 position = @Position,
-                role = coalesce(nullif(@Role, ''), role)::user_role,
-                approver_id = @ApproverId
+                role = coalesce(nullif(@Role, ''), role::text)::user_role,
+                approver_id = @ApproverId,
+                basic_salary = @BasicSalary
             where id = @Id::uuid
             returning *
             """,
@@ -188,7 +190,8 @@ public class StaffController : ControllerBase
                 Department = request.Department?.Trim(),
                 Position = request.Position?.Trim(),
                 Role = role,
-                ApproverId = request.ApproverId
+                ApproverId = request.ApproverId,
+                BasicSalary = request.BasicSalary
             }, tx);
 
         if (row is null)
