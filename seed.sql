@@ -57,15 +57,17 @@ begin
   -- Email identity link: required by GoTrue's password flow. Some Supabase
   -- versions auto-create this row via a trigger; guard against duplicates.
   -- NOTE: auth.identities.id is uuid in this project → pass the uuid directly;
-  -- provider_id stays text.
+  -- provider_id stays text. auth.identities.email is a GENERATED column
+  -- (computed from identity_data), so it is intentionally omitted from the
+  -- insert — Postgres fills it from the identity_data jsonb below.
   insert into auth.identities (
     id, user_id, provider_id, identity_data, provider,
-    last_sign_in_at, created_at, updated_at, email
+    last_sign_in_at, created_at, updated_at
   )
   select
     p_id, p_id, p_id::text,
     jsonb_build_object('sub', p_id::text, 'email', p_email),
-    'email', now(), now(), now(), p_email
+    'email', now(), now(), now()
   where not exists (
     select 1 from auth.identities i
     where i.user_id = p_id and i.provider = 'email'
