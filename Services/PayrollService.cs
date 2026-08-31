@@ -13,9 +13,13 @@ namespace PinoyRideHrApi.Services;
 /// Computation rules (shown on the payslip so they stay transparent):
 ///   daily rate         = basic salary ÷ 22
 ///   semi-monthly basic = basic salary ÷ 2
-///   absence deduction  = daily rate × absent workdays
+///   absence deduction  = daily rate × absent workdays (fixed-salary staff who
+///                        clock in for zero days are not deducted)
 ///   overtime pay       = OT hours × (daily rate ÷ 8) × 1.25
+///   office allowance   = ₱100 × present office workdays
+///   mobile allowance   = ₱100 × number of weeks with ≥1 workday in the cutoff
 ///   net pay            = semi-monthly basic − absence deduction + overtime pay
+///                         + office allowance + mobile allowance
 ///
 /// Workdays are Monday–Friday. A workday is absent when the staff has neither
 /// a time_entries row nor an approved leave request covering it (approving a
@@ -34,6 +38,12 @@ public class PayrollService
 
     /// <summary>Overtime premium on ordinary workdays (PH Labor Code: +25%).</summary>
     public const decimal OvertimeMultiplier = 1.25m;
+
+    /// <summary>PHP allowance per office workday the staff was present.</summary>
+    public const decimal OfficeDailyAllowance = 100m;
+
+    /// <summary>PHP mobile/internet allowance per week with at least one workday in the cutoff.</summary>
+    public const decimal MobileWeeklyAllowance = 100m;
 
     private readonly Db _db;
 
@@ -169,6 +179,8 @@ public class PayrollService
         var countedWorkdays = 0;
         var totalOvertimeHours = 0.0;
 
+        var officeAllowanceDays = 0;  // office workdays the staff was present
+
         foreach (var day in Workdays(period.Start, period.End))
         {
             string status;
@@ -183,6 +195,11 @@ public class PayrollService
                 {
                     status = "present";
                     worked++;
+                    var dayEntry = entries.FirstOrDefault(e => e.WorkDate == day);
+                    if (dayEntry?.WorkSetup == "office")
+                    {
+                        officeAllowanceDays++;
+                    }
                 }
                 else if (leaveSet.Contains(day))
                 {
@@ -235,13 +252,33 @@ public class PayrollService
 
         PayrollComputation? computation = null;
         if (staff.BasicSalary.HasValue)
-        {
+                {
             var basic = staff.BasicSalary.Value;
             var dailyRate = Round(basic / PayrollDaysPerMonth);
             var semiMonthly = Round(basic / 2m);
-            var deduction = Round(dailyRate * absent);
             var hourlyRate = dailyRate / StandardDailyHours;
             var overtimePay = Round((decimal)totalOvertimeHours * hourlyRate * OvertimeMultiplier);
+
+            // Office allowance: Php 100 per office workday the staff was present
+            var officeAllowance = Round(OfficeDailyAllowance * officeAllowanceDays);
+
+            // Mobile allowance: Php 100 per week (Mon-Sun) with at least one workday in the cutoff
+            var weeksWithWorkdays = CountWeeksWithWorkdays(period.Start, period.End);
+            var mobileAllowance = Round(MobileWeeklyAllowance * weeksWithWorkdays);
+
+            // Absence deduction: fixed-salary staff with zero clock-ins get no deduction
+            // (they're treated as fixed-pay, not hourly). Staff who clock in but miss some
+            // days are still deducted for those absent days.
+            decimal deduction;
+            if (worked == 0 && paidLeave == 0)
+            {
+                deduction = 0;
+            }
+            else
+            {
+                deduction = Round(dailyRate * absent);
+            }
+
             computation = new PayrollComputation
             {
                 BasicSalary = basic,
@@ -254,7 +291,9 @@ public class PayrollService
                 AbsenceDeduction = deduction,
                 OvertimeHours = totalOvertimeHours,
                 OvertimePay = overtimePay,
-                NetPay = semiMonthly - deduction + overtimePay
+                OfficeAllowance = officeAllowance,
+                MobileAllowance = mobileAllowance,
+                NetPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance
             };
         }
 
@@ -269,4 +308,22 @@ public class PayrollService
 
     private static decimal Round(decimal value) =>
         Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// Counts how many distinct Monday–Sunday weeks contain at least one
+    /// workday (Mon–Fri) within the cutoff period. Used to compute the
+    /// Php 100-per-week mobile allowance.
+    /// </summary>
+    private static int CountWeeksWithWorkdays(DateOnly start, DateOnly end)
+    {
+        var workdays = Workdays(start, end);
+        var mondays = new HashSet<DateOnly>();
+        foreach (var d in workdays)
+        {
+            // Monday = start of the week (DayOfWeek.Monday == 1)
+            var monday = d.AddDays(-(int)d.DayOfWeek + (d.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
+            mondays.Add(monday);
+        }
+        return mondays.Count;
+    }
 }

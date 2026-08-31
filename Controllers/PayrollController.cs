@@ -68,6 +68,8 @@ public class PayrollController : ControllerBase
                 AbsenceDeduction = slip.Computation?.AbsenceDeduction,
                 OvertimeHours = slip.Computation?.OvertimeHours ?? 0,
                 OvertimePay = slip.Computation?.OvertimePay,
+                OfficeAllowance = slip.Computation?.OfficeAllowance,
+                MobileAllowance = slip.Computation?.MobileAllowance,
                 NetPay = slip.Computation?.NetPay
             });
         }

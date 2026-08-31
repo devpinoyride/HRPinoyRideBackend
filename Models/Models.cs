@@ -95,6 +95,8 @@ public class PayrollComputation
     public decimal AbsenceDeduction { get; set; }
     public double OvertimeHours { get; set; }
     public decimal OvertimePay { get; set; }
+    public decimal OfficeAllowance { get; set; }
+    public decimal MobileAllowance { get; set; }
     public decimal NetPay { get; set; }
 }
 
@@ -124,5 +126,7 @@ public class PayrollSummaryRow
     public decimal? AbsenceDeduction { get; set; }
     public double OvertimeHours { get; set; }
     public decimal? OvertimePay { get; set; }
+    public decimal? OfficeAllowance { get; set; }
+    public decimal? MobileAllowance { get; set; }
     public decimal? NetPay { get; set; }
 }
