@@ -73,6 +73,10 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
+        // Keep original claim names (sub, role, full_name). The default inbound
+        // mapping renames them to long XML claim types, so FindFirst("sub")
+        // and the role policies would never match.
+        o.MapInboundClaims = false;
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -119,6 +123,15 @@ if (builder.Environment.IsDevelopment())
         });
     });
 }
+
+// Map Postgres snake_case columns (full_name, work_date, approver_id, ...)
+// onto PascalCase properties (FullName, WorkDate, ApproverId, ...) for all
+// Dapper queries. Without this, those properties silently stay null.
+Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
+
+// Teach Dapper to bind/parse Postgres date and time values as
+// DateOnly/TimeOnly (the types the models use).
+DapperTypeHandlers.Register();
 
 var app = builder.Build();
 
