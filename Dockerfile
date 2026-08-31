@@ -12,6 +12,9 @@ RUN dotnet publish -c Release -o /app
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app .
+# Use polling instead of inotify for config file watching — Render's shared
+# hosts exhaust the inotify instance limit, which crashed the app at startup.
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
 ENV ASPNETCORE_URLS=http://+:${PORT:-8080}
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "PinoyRideHrApi.dll"]
