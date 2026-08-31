@@ -1,0 +1,137 @@
+using Dapper;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using PinoyRideHrApi.Data;
+using PinoyRideHrApi.Infrastructure;
+using PinoyRideHrApi.Models;
+
+namespace PinoyRideHrApi.Controllers;
+
+[ApiController]
+[Route("api/clock")]
+[Authorize]
+public class ClockController : ControllerBase
+{
+    private readonly Db _db;
+    private readonly AuditService _audit;
+
+    public ClockController(Db db, AuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
+
+    private Guid CurrentUserId()
+    {
+        var value = User.FindFirst("sub")?.Value;
+        if (value is null || !Guid.TryParse(value, out var id))
+        {
+            throw new ApiException(401, "Unauthenticated.");
+        }
+        return id;
+    }
+
+    /// <summary>POST /api/clock/in — upsert today's entry (insert when missing).</summary>
+    [HttpPost("in")]
+    public async Task<IActionResult> ClockIn()
+    {
+        var uid = CurrentUserId();
+        var today = PhClock.Today;
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var existing = await con.QuerySingleOrDefaultAsync<TimeEntry>(
+            """
+            select * from time_entries
+            where user_id = @Uid::uuid and work_date = @Date
+            """,
+            new { Uid = uid, Date = today }, tx);
+
+        if (existing is not null)
+        {
+            return Ok(existing);
+        }
+
+        var row = await con.QuerySingleAsync<TimeEntry>(
+            """
+            insert into time_entries (user_id, work_date, time_in, source, status)
+            values (@Uid::uuid, @Date, @Now, 'self_logged', 'confirmed')
+            returning *
+            """,
+            new { Uid = uid, Date = today, Now = DateTime.UtcNow }, tx);
+
+        await _audit.AddAsync(con, tx, uid, "clock_in", "time_entries", row.Id.ToString(),
+            new { user_id = uid, work_date = today, time_in = row.TimeIn });
+
+        tx.Commit();
+        return StatusCode(201, row);
+    }
+
+    /// <summary>POST /api/clock/out — set time_out on today's open entry.</summary>
+    [HttpPost("out")]
+    public async Task<IActionResult> ClockOut()
+    {
+        var uid = CurrentUserId();
+        var today = PhClock.Today;
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var row = await con.QuerySingleOrDefaultAsync<TimeEntry>(
+            """
+            select * from time_entries
+            where user_id = @Uid::uuid and work_date = @Date
+            """,
+            new { Uid = uid, Date = today }, tx);
+
+        if (row is null)
+        {
+            return StatusCode(409, new { error = "You have not clocked in today." });
+        }
+
+        if (row.TimeOut is not null)
+        {
+            return StatusCode(409, new { error = "You have already clocked out today." });
+        }
+
+        row = await con.QuerySingleAsync<TimeEntry>(
+            """
+            update time_entries
+            set time_out = @Now, updated_at = now()
+            where id = @Id
+            returning *
+            """,
+            new { Now = DateTime.UtcNow, Id = row.Id }, tx);
+
+        await _audit.AddAsync(con, tx, uid, "clock_out", "time_entries", row.Id.ToString(),
+            new { time_out = row.TimeOut });
+
+        tx.Commit();
+        return Ok(row);
+    }
+
+    /// <summary>GET /api/clock/today — today's entry plus the current week for this user.</summary>
+    [HttpGet("today")]
+    public async Task<IActionResult> Today()
+    {
+        var uid = CurrentUserId();
+        var today = PhClock.Today;
+        var weekStart = today.AddDays(-((int)today.DayOfWeek + 6) % 7); // Monday of this week
+
+        using var con = _db.Open();
+        var entries = (await con.QueryAsync<TimeEntry>(
+            """
+            select * from time_entries
+            where user_id = @Uid::uuid and work_date between @From and @To
+            order by work_date asc
+            """,
+            new { Uid = uid, From = weekStart, To = weekStart.AddDays(6) })).AsList();
+
+        return Ok(new
+        {
+            today = entries.FirstOrDefault(e => e.WorkDate == today),
+            week = entries
+        });
+    }
+}

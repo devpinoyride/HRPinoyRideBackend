@@ -1,0 +1,11 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+Dockerfile
+render.yaml
+README.md
+schema.sql
+.dockerignore
+.gitignore

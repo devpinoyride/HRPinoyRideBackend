@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: pinoyride-hr-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_SIGNING_KEY
+        sync: false
+      - key: ALLOWED_ORIGIN
+        sync: false
