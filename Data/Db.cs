@@ -59,6 +59,10 @@ public class Db
                     check (work_days in ('mon_fri', 'mon_sat'));
             alter table public.profiles
                 add column if not exists fixed_salary boolean not null default false;
+            alter table public.profiles
+                add column if not exists sched_time_in time not null default '09:00';
+            alter table public.profiles
+                add column if not exists sched_time_out time not null default '17:00';
 
             do $$
             begin

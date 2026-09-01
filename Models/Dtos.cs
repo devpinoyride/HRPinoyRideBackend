@@ -50,6 +50,8 @@ public class CreateStaffRequest
     public decimal? MobileIncentiveAmount { get; set; }
     public string? WorkDays { get; set; }              // 'mon_fri' or 'mon_sat'
     public bool? FixedSalary { get; set; }
+    public string? SchedTimeIn { get; set; }           // "HH:mm"
+    public string? SchedTimeOut { get; set; }          // "HH:mm"
 }
 
 public class UpdateStaffRequest
@@ -67,4 +69,6 @@ public class UpdateStaffRequest
     public decimal? MobileIncentiveAmount { get; set; }
     public string? WorkDays { get; set; }              // 'mon_fri' or 'mon_sat'
     public bool? FixedSalary { get; set; }
+    public string? SchedTimeIn { get; set; }           // "HH:mm"
+    public string? SchedTimeOut { get; set; }          // "HH:mm"
 }

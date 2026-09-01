@@ -20,6 +20,8 @@ public class Profile
     public decimal MobileIncentiveAmount { get; set; } = 100m;  // per week with ≥1 workday
     public string WorkDays { get; set; } = "mon_fri";           // 'mon_fri' or 'mon_sat'
     public bool FixedSalary { get; set; }                       // basic mode: always full pay, no deduction
+    public TimeOnly SchedTimeIn { get; set; } = new(9, 0);      // expected daily time-in
+    public TimeOnly SchedTimeOut { get; set; } = new(17, 0);    // expected daily time-out
     public string? ApproverName { get; set; }
     public DateTime? CreatedAt { get; set; }
 }
@@ -90,6 +92,9 @@ public class PayrollDayDetail
     public string? WorkSetup { get; set; }
     public double? Hours { get; set; }
     public double? OvertimeHours { get; set; }
+    // Punctuality (present days only): minutes late beyond grace, minutes left early.
+    public int LateMinutes { get; set; }
+    public int EarlyOutMinutes { get; set; }
 }
 
 public class PayrollComputation
@@ -120,6 +125,11 @@ public class PayrollComputation
     // Sunday work (by request): flat +1 daily rate per approved Sunday worked.
     public int SundayDays { get; set; }
     public decimal SundayPay { get; set; }
+    // Tardiness / undertime (late-in beyond 15-min grace + early-out), pro-rata.
+    public int LateMinutes { get; set; }
+    public int EarlyOutMinutes { get; set; }
+    public decimal TardinessDeduction { get; set; }
+    public decimal MinuteRate { get; set; }
     public decimal NetPay { get; set; }
 }
 

@@ -63,6 +63,9 @@ public class PayrollService
     /// <summary>Overtime premium on ordinary workdays (PH Labor Code: +25%).</summary>
     public const decimal OvertimeMultiplier = 1.25m;
 
+    /// <summary>Grace period (minutes) applied to late arrival only.</summary>
+    public const int LateGraceMinutes = 15;
+
     private readonly Db _db;
 
     public PayrollService(Db db) => _db = db;
@@ -137,7 +140,8 @@ public class PayrollService
             select id, email, full_name, department, position, role, status, approver_id, basic_salary,
                    salary_mode, daily_rate,
                    office_incentive_enabled, office_incentive_amount,
-                   mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary
+                   mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary,
+                   sched_time_in, sched_time_out
             from profiles
             order by full_name asc
             """);
@@ -153,7 +157,8 @@ public class PayrollService
             select id, email, full_name, department, position, role, status, approver_id, basic_salary,
                    salary_mode, daily_rate,
                    office_incentive_enabled, office_incentive_amount,
-                   mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary
+                   mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary,
+                   sched_time_in, sched_time_out
             from profiles
             where id = @Id::uuid
             """,
@@ -209,6 +214,11 @@ public class PayrollService
         var totalOvertimeHours = 0.0;
 
         var officeAllowanceDays = 0;  // office workdays the staff was present
+        var totalLateMinutes = 0;     // minutes late beyond grace, summed over present days
+        var totalEarlyOutMinutes = 0; // minutes left early, summed over present days
+
+        var schedIn = staff.SchedTimeIn;
+        var schedOut = staff.SchedTimeOut;
 
         var workDayPattern = staff.WorkDays ?? "mon_fri";
 
@@ -274,6 +284,29 @@ public class PayrollService
                 }
             }
 
+            // Punctuality (present days only): compare actual vs scheduled.
+            //   Late     = time_in later than (schedule in + 15-min grace)
+            //   Early-out = time_out earlier than schedule out (no grace)
+            var lateMin = 0;
+            var earlyMin = 0;
+            if (status == "present")
+            {
+                var schedInAt = day.ToDateTime(schedIn);
+                var schedOutAt = day.ToDateTime(schedOut);
+                if (timeIn.HasValue)
+                {
+                    var lateBy = (timeIn.Value - schedInAt).TotalMinutes - LateGraceMinutes;
+                    if (lateBy > 0) lateMin = (int)Math.Round(lateBy, MidpointRounding.AwayFromZero);
+                }
+                if (timeOut.HasValue)
+                {
+                    var earlyBy = (schedOutAt - timeOut.Value).TotalMinutes;
+                    if (earlyBy > 0) earlyMin = (int)Math.Round(earlyBy, MidpointRounding.AwayFromZero);
+                }
+                totalLateMinutes += lateMin;
+                totalEarlyOutMinutes += earlyMin;
+            }
+
             days.Add(new PayrollDayDetail
             {
                 Date = day,
@@ -284,7 +317,9 @@ public class PayrollService
                 Source = entry?.Source,
                 WorkSetup = entry?.WorkSetup,
                 Hours = hours,
-                OvertimeHours = overtimeHours
+                OvertimeHours = overtimeHours,
+                LateMinutes = lateMin,
+                EarlyOutMinutes = earlyMin
             });
         }
 
@@ -403,7 +438,15 @@ public class PayrollService
             // added on top of the base pay in every salary mode.
             var sundayPay = Round(dailyRate * sundayDays);
 
-            var netPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay;
+            // Tardiness / undertime: pro-rata by the minute (daily rate ÷ 8h ÷ 60).
+            // Fixed-salary staff are exempt (consistent with "always full pay").
+            var minuteRate = Round(dailyRate / StandardDailyHours / 60m);
+            var tardyMinutes = totalLateMinutes + totalEarlyOutMinutes;
+            var tardinessDeduction = (staff.FixedSalary && salaryMode == "basic")
+                ? 0m
+                : Round(minuteRate * tardyMinutes);
+
+            var netPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay - tardinessDeduction;
 
             computation = new PayrollComputation
             {
@@ -430,6 +473,10 @@ public class PayrollService
                 MobileAllowance = mobileAllowance,
                 SundayDays = sundayDays,
                 SundayPay = sundayPay,
+                LateMinutes = totalLateMinutes,
+                EarlyOutMinutes = totalEarlyOutMinutes,
+                TardinessDeduction = tardinessDeduction,
+                MinuteRate = minuteRate,
                 NetPay = netPay
             };
         }

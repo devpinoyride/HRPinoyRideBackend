@@ -78,6 +78,11 @@ alter table public.profiles add column if not exists work_days text not null def
 -- Only meaningful for salary_mode = 'basic'. Default false (attendance-based).
 alter table public.profiles add column if not exists fixed_salary boolean not null default false;
 
+-- Expected daily schedule per staff. Drives late-in / early-out detection and
+-- the pro-rata tardiness/undertime deduction. Defaults 09:00–17:00.
+alter table public.profiles add column if not exists sched_time_in  time not null default '09:00';
+alter table public.profiles add column if not exists sched_time_out time not null default '17:00';
+
 create index if not exists profiles_approver_id_idx on public.profiles (approver_id);
 create index if not exists profiles_role_idx        on public.profiles (role);
 
