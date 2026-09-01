@@ -1,3 +1,4 @@
+using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -75,6 +76,77 @@ public class PayrollController : ControllerBase
         }
 
         return Ok(new { period, rows });
+    }
+
+    /// <summary>
+    /// GET /api/payroll/export?year=&amp;month=&amp;cutoff= — bulk payroll for the
+    /// chosen cutoff as a CSV file (one row per staff member). HR admin only.
+    /// Mirrors the summary computation and includes the incentive breakdown.
+    /// </summary>
+    [HttpGet("export")]
+    [Authorize(Policy = "HrAdmin")]
+    public async Task<IActionResult> Export([FromQuery] int? year, [FromQuery] int? month, [FromQuery] int? cutoff)
+    {
+        var today = PhClock.Today;
+        var period = PayrollService.ResolvePeriod(year ?? today.Year, month ?? today.Month, cutoff ?? PayrollService.DefaultCutoff(today));
+
+        var staff = await _payroll.GetStaffAsync();
+
+        var sb = new StringBuilder();
+        // Human-readable header block so the exported file documents the cutoff.
+        sb.Append("Pinoy Ride — Payroll ").Append(period.Cutoff == 1 ? "Cutoff 1 (11–25)" : "Cutoff 2 (26–10)")
+          .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
+          .AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,NetPay");
+
+        decimal totalNet = 0m;
+        foreach (var person in staff)
+        {
+            var slip = await _payroll.ComputeAsync(person, period);
+            var c = slip.Computation;
+            totalNet += c?.NetPay ?? 0m;
+
+            sb.Append(Csv(person.FullName)).Append(',')
+              .Append(Csv(person.Email)).Append(',')
+              .Append(Csv(person.Department)).Append(',')
+              .Append(Csv(person.Position)).Append(',')
+              .Append(Csv(person.Role)).Append(',')
+              .Append(Csv(person.Status)).Append(',')
+              .Append(Csv(c?.SalaryMode ?? person.SalaryMode ?? "basic")).Append(',')
+              .Append(Csv(person.BasicSalary?.ToString("0.00"))).Append(',')
+              .Append(Csv(c is null ? "" : c.DailyRate.ToString("0.00"))).Append(',')
+              .Append(Csv((c?.Workdays ?? 0).ToString())).Append(',')
+              .Append(Csv((c?.WorkedDays ?? 0).ToString())).Append(',')
+              .Append(Csv((c?.PaidLeaveDays ?? 0).ToString())).Append(',')
+              .Append(Csv((c?.AbsentDays ?? 0).ToString())).Append(',')
+              .Append(Csv(c is null ? "" : c.SemiMonthlyBasic.ToString("0.00"))).Append(',')
+              .Append(Csv(c is null ? "" : c.AbsenceDeduction.ToString("0.00"))).Append(',')
+              .Append(Csv((c?.OvertimeHours ?? 0).ToString("0.##"))).Append(',')
+              .Append(Csv(c is null ? "" : c.OvertimePay.ToString("0.00"))).Append(',')
+              .Append(Csv(c is null ? "" : c.OfficeAllowance.ToString("0.00"))).Append(',')
+              .Append(Csv(c is null ? "" : c.MobileAllowance.ToString("0.00"))).Append(',')
+              .Append(Csv(c is null ? "" : c.NetPay.ToString("0.00")))
+              .AppendLine();
+        }
+
+        // Trailing total row for quick reconciliation.
+        sb.AppendLine();
+        sb.Append("TOTAL NET PAY,,,,,,,,,,,,,,,,,,,").Append(totalNet.ToString("0.00")).AppendLine();
+
+        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+        var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.csv";
+        return File(bytes, "text/csv", fileName);
+    }
+
+    private static string Csv(object? value)
+    {
+        var s = value?.ToString() ?? "";
+        if (s.Contains(',') || s.Contains('"') || s.Contains('\n') || s.Contains('\r'))
+        {
+            s = "\"" + s.Replace("\"", "\"\"") + "\"";
+        }
+        return s;
     }
 
     /// <summary>
