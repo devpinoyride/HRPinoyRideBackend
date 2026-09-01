@@ -108,45 +108,59 @@ public class ApprovalsController : ControllerBase
             """,
             new { Notes = notes, Id = id }, tx);
 
-        var entry = await con.QuerySingleAsync<TimeEntry>(
-            """
-            insert into time_entries (user_id, work_date, time_in, time_out, source, status)
-            values (@UserId::uuid, @WorkDate, @In, @Out, 'adjusted', 'confirmed')
-            on conflict (user_id, work_date)
-            do update set
-                time_in = excluded.time_in,
-                time_out = excluded.time_out,
-                source = 'adjusted',
-                status = 'confirmed',
-                updated_at = now()
-            returning id, user_id, work_date, time_in, time_out,
-                      source::text as source, status::text as status, work_setup::text as work_setup,
-                      created_at, updated_at
-            """,
-            new
-            {
-                UserId = req.UserId,
-                WorkDate = req.WorkDate,
-                In = req.RequestedTimeIn.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeIn.Value) : (DateTime?)null,
-                Out = req.RequestedTimeOut.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeOut.Value) : (DateTime?)null
-            }, tx);
+        // Only adjustment / overtime requests write an actual time entry (the
+        // requested clock in/out become the worked shift). A LEAVE (or 'other')
+        // must NOT create a worked entry — payroll recognizes approved leave via
+        // the leave request itself (status='approved', request_type='leave') and
+        // pays it as paid leave. Writing a time entry here would make the day
+        // count as "present" instead of "paid_leave", so leave is skipped.
+        var writesTimeEntry = string.Equals(req.RequestType, "adjustment", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(req.RequestType, "overtime", StringComparison.OrdinalIgnoreCase);
+
+        if (writesTimeEntry)
+        {
+            var entry = await con.QuerySingleAsync<TimeEntry>(
+                """
+                insert into time_entries (user_id, work_date, time_in, time_out, source, status)
+                values (@UserId::uuid, @WorkDate, @In, @Out, 'adjusted', 'confirmed')
+                on conflict (user_id, work_date)
+                do update set
+                    time_in = excluded.time_in,
+                    time_out = excluded.time_out,
+                    source = 'adjusted',
+                    status = 'confirmed',
+                    updated_at = now()
+                returning id, user_id, work_date, time_in, time_out,
+                          source::text as source, status::text as status, work_setup::text as work_setup,
+                          created_at, updated_at
+                """,
+                new
+                {
+                    UserId = req.UserId,
+                    WorkDate = req.WorkDate,
+                    In = req.RequestedTimeIn.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeIn.Value) : (DateTime?)null,
+                    Out = req.RequestedTimeOut.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeOut.Value) : (DateTime?)null
+                }, tx);
+
+            await _audit.AddAsync(con, tx, uid, "adjust_time_entry", "time_entries", entry.Id.ToString(),
+                new
+                {
+                    user_id = req.UserId,
+                    work_date = req.WorkDate,
+                    time_in = entry.TimeIn,
+                    time_out = entry.TimeOut
+                });
+        }
 
         await _audit.AddAsync(con, tx, uid, "approve_request", "timekeeping_requests", updated.Id.ToString(),
             new
             {
                 user_id = req.UserId,
                 work_date = req.WorkDate,
+                request_type = req.RequestType,
                 requested_time_in = req.RequestedTimeIn,
                 requested_time_out = req.RequestedTimeOut,
                 notes
-            });
-        await _audit.AddAsync(con, tx, uid, "adjust_time_entry", "time_entries", entry.Id.ToString(),
-            new
-            {
-                user_id = req.UserId,
-                work_date = req.WorkDate,
-                time_in = entry.TimeIn,
-                time_out = entry.TimeOut
             });
 
         tx.Commit();
