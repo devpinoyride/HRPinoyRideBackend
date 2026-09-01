@@ -287,22 +287,27 @@ public class PayrollService
             // Punctuality (present days only): compare actual vs scheduled.
             //   Late     = time_in later than (schedule in + 15-min grace)
             //   Early-out = time_out earlier than schedule out (no grace)
+            // Only counted when the day has a VALID pair of timestamps
+            // (clock-out after clock-in). A malformed/negative entry — e.g. an
+            // AM/PM mistake making time_out earlier than time_in — is skipped so
+            // it never produces a runaway undertime deduction.
             var lateMin = 0;
             var earlyMin = 0;
-            if (status == "present")
+            var validPair = timeIn.HasValue && timeOut.HasValue && timeOut.Value > timeIn.Value;
+            if (status == "present" && validPair)
             {
                 var schedInAt = day.ToDateTime(schedIn);
                 var schedOutAt = day.ToDateTime(schedOut);
-                if (timeIn.HasValue)
-                {
-                    var lateBy = (timeIn.Value - schedInAt).TotalMinutes - LateGraceMinutes;
-                    if (lateBy > 0) lateMin = (int)Math.Round(lateBy, MidpointRounding.AwayFromZero);
-                }
-                if (timeOut.HasValue)
-                {
-                    var earlyBy = (schedOutAt - timeOut.Value).TotalMinutes;
-                    if (earlyBy > 0) earlyMin = (int)Math.Round(earlyBy, MidpointRounding.AwayFromZero);
-                }
+
+                var lateBy = (timeIn!.Value - schedInAt).TotalMinutes - LateGraceMinutes;
+                if (lateBy > 0) lateMin = (int)Math.Round(lateBy, MidpointRounding.AwayFromZero);
+
+                // Undertime is capped at the scheduled workday span so a bad
+                // entry can't exceed one day's worth of minutes.
+                var scheduledSpanMin = Math.Max(0, (schedOutAt - schedInAt).TotalMinutes);
+                var earlyBy = (schedOutAt - timeOut!.Value).TotalMinutes;
+                if (earlyBy > 0) earlyMin = (int)Math.Min(scheduledSpanMin, Math.Round(earlyBy, MidpointRounding.AwayFromZero));
+
                 totalLateMinutes += lateMin;
                 totalEarlyOutMinutes += earlyMin;
             }
@@ -446,7 +451,16 @@ public class PayrollService
                 ? 0m
                 : Round(minuteRate * tardyMinutes);
 
-            var netPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay - tardinessDeduction;
+            // Pay before the tardiness deduction. Cap the deduction so net pay
+            // never goes negative from tardiness/undertime.
+            var payBeforeTardiness = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay;
+            if (tardinessDeduction > payBeforeTardiness && payBeforeTardiness > 0)
+            {
+                tardinessDeduction = payBeforeTardiness;
+            }
+
+            var netPay = payBeforeTardiness - tardinessDeduction;
+            if (netPay < 0) netPay = 0;
 
             computation = new PayrollComputation
             {
