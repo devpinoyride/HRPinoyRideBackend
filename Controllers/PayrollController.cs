@@ -100,7 +100,7 @@ public class PayrollController : ControllerBase
           .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
           .AppendLine();
         sb.AppendLine();
-        sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,NetPay");
+        sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,SundayDays,SundayPay,NetPay");
 
         decimal totalNet = 0m;
         foreach (var person in staff)
@@ -128,13 +128,15 @@ public class PayrollController : ControllerBase
               .Append(Csv(c is null ? "" : c.OvertimePay.ToString("0.00"))).Append(',')
               .Append(Csv(c is null ? "" : c.OfficeAllowance.ToString("0.00"))).Append(',')
               .Append(Csv(c is null ? "" : c.MobileAllowance.ToString("0.00"))).Append(',')
+              .Append(Csv((c?.SundayDays ?? 0).ToString())).Append(',')
+              .Append(Csv(c is null ? "" : c.SundayPay.ToString("0.00"))).Append(',')
               .Append(Csv(c is null ? "" : c.NetPay.ToString("0.00")))
               .AppendLine();
         }
 
         // Trailing total row for quick reconciliation.
         sb.AppendLine();
-        sb.Append("TOTAL NET PAY,,,,,,,,,,,,,,,,,,,").Append(totalNet.ToString("0.00")).AppendLine();
+        sb.Append("TOTAL NET PAY,,,,,,,,,,,,,,,,,,,,,").Append(totalNet.ToString("0.00")).AppendLine();
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
         var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.csv";

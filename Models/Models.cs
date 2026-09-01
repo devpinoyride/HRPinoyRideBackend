@@ -117,6 +117,9 @@ public class PayrollComputation
     public decimal MobileIncentiveRate { get; set; }
     public int MobileIncentiveWeeks { get; set; }
     public decimal MobileAllowance { get; set; }
+    // Sunday work (by request): flat +1 daily rate per approved Sunday worked.
+    public int SundayDays { get; set; }
+    public decimal SundayPay { get; set; }
     public decimal NetPay { get; set; }
 }
 

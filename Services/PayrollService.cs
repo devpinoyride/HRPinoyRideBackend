@@ -7,8 +7,8 @@ namespace PinoyRideHrApi.Services;
 
 /// <summary>
 /// Semi-monthly payroll for Philippines-style cutoffs:
-///   cutoff 1 → 11th–25th of the month
-///   cutoff 2 → 26th of the month – 10th of the next month
+///   cutoff 1 → 1st–15th of the month
+///   cutoff 2 → 16th–end of the month
 ///
 /// Computation rules (shown on the payslip so they stay transparent):
 ///
@@ -21,8 +21,9 @@ namespace PinoyRideHrApi.Services;
 ///   office incentive   = per-staff rate × present office workdays (₱0 if disabled)
 ///   mobile incentive   = per-staff rate × weeks the staff actually worked
 ///                        (present or paid leave; ₱0 if disabled)
+///   sunday pay         = daily rate × approved Sundays worked (by request)
 ///   net pay            = semi-monthly basic − absence deduction + overtime pay
-///                         + office incentive + mobile incentive
+///                         + office incentive + mobile incentive + sunday pay
 ///
 /// DAILY mode (salary_mode = 'daily', for staff paid per day worked, e.g. ₱850/day):
 ///   daily rate         = daily_rate field directly
@@ -32,8 +33,9 @@ namespace PinoyRideHrApi.Services;
 ///   office incentive   = per-staff rate × present office workdays (₱0 if disabled)
 ///   mobile incentive   = per-staff rate × weeks the staff actually worked
 ///                        (present or paid leave; ₱0 if disabled)
+///   sunday pay         = daily rate × approved Sundays worked (by request)
 ///   net pay            = semi-monthly basic + overtime pay
-///                         + office incentive + mobile incentive
+///                         + office incentive + mobile incentive + sunday pay
 ///
 /// Office and mobile incentives are configured per staff on the Staff page
 /// (toggle + editable peso amount); disabled incentives contribute ₱0 but are
@@ -78,34 +80,36 @@ public class PayrollService
         }
         if (cutoff is not (1 or 2))
         {
-            throw new ApiException(422, "cutoff must be 1 (11–25) or 2 (26–10).");
+            throw new ApiException(422, "cutoff must be 1 (1–15) or 2 (16–end of month).");
         }
 
         if (cutoff == 1)
         {
+            // Cutoff 1: 1st–15th of the month.
             return new PayrollPeriod
             {
                 Year = year,
                 Month = month,
                 Cutoff = 1,
-                Start = new DateOnly(year, month, 11),
-                End = new DateOnly(year, month, 25)
+                Start = new DateOnly(year, month, 1),
+                End = new DateOnly(year, month, 15)
             };
         }
 
-        var next = month == 12 ? new DateOnly(year + 1, 1, 10) : new DateOnly(year, month + 1, 10);
+        // Cutoff 2: 16th–end of the month (handles 28/29/30/31-day months).
+        var lastDay = DateTime.DaysInMonth(year, month);
         return new PayrollPeriod
         {
             Year = year,
             Month = month,
             Cutoff = 2,
-            Start = new DateOnly(year, month, 26),
-            End = next
+            Start = new DateOnly(year, month, 16),
+            End = new DateOnly(year, month, lastDay)
         };
     }
 
-    /// <summary>Which cutoff is currently open (26th and later → cutoff 2).</summary>
-    public static int DefaultCutoff(DateOnly today) => today.Day >= 26 ? 2 : 1;
+    /// <summary>Which cutoff is currently open (16th and later → cutoff 2).</summary>
+    public static int DefaultCutoff(DateOnly today) => today.Day >= 16 ? 2 : 1;
 
     /// <summary>
     /// Workday dates between the two dates, inclusive, according to the work-week
@@ -284,6 +288,42 @@ public class PayrollService
             });
         }
 
+        // ---- Sunday work (by request) --------------------------------------
+        // A Sunday is paid only when the staff both has a time entry AND an
+        // approved request covering that Sunday. Each qualifying Sunday pays a
+        // flat +1 daily rate (added on top of the base pay), regardless of
+        // salary mode. Sundays are never part of the Mon–Fri/Mon–Sat base.
+        var sundayDays = 0;
+        for (var d = period.Start; d <= period.End; d = d.AddDays(1))
+        {
+            if (d.DayOfWeek != DayOfWeek.Sunday) continue;
+            if (d > today) continue;
+            var worksSunday = entryDates.Contains(d) && overtimeSet.Contains(d);
+            if (!worksSunday) continue;
+
+            sundayDays++;
+            activeWeekMondays.Add(WeekMonday(d));
+            var sEntry = entries.FirstOrDefault(e => e.WorkDate == d);
+            if (sEntry?.WorkSetup == "office") officeAllowanceDays++;
+
+            days.Add(new PayrollDayDetail
+            {
+                Date = d,
+                Weekday = d.ToString("dddd"),
+                Status = "sunday",
+                TimeIn = PhClock.ToLocal(sEntry?.TimeIn),
+                TimeOut = PhClock.ToLocal(sEntry?.TimeOut),
+                Source = sEntry?.Source,
+                WorkSetup = sEntry?.WorkSetup,
+                Hours = (sEntry?.TimeIn is not null && sEntry?.TimeOut is not null)
+                    ? Math.Round((PhClock.ToLocal(sEntry.TimeOut)!.Value - PhClock.ToLocal(sEntry.TimeIn)!.Value).TotalHours, 2)
+                    : null,
+                OvertimeHours = null
+            });
+        }
+        // Keep the day list in date order (Sundays were appended at the end).
+        days = days.OrderBy(x => x.Date).ToList();
+
         PayrollComputation? computation = null;
 
         var salaryMode = staff.SalaryMode ?? "basic";
@@ -359,7 +399,11 @@ public class PayrollService
             var mobileRate = staff.MobileIncentiveEnabled ? staff.MobileIncentiveAmount : 0m;
             var mobileAllowance = Round(mobileRate * weeksWithWorkdays);
 
-            var netPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance;
+            // Sunday work (by request): flat +1 daily rate per approved Sunday worked,
+            // added on top of the base pay in every salary mode.
+            var sundayPay = Round(dailyRate * sundayDays);
+
+            var netPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay;
 
             computation = new PayrollComputation
             {
@@ -384,6 +428,8 @@ public class PayrollService
                 MobileIncentiveRate = mobileRate,
                 MobileIncentiveWeeks = weeksWithWorkdays,
                 MobileAllowance = mobileAllowance,
+                SundayDays = sundayDays,
+                SundayPay = sundayPay,
                 NetPay = netPay
             };
         }
