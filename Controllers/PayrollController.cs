@@ -139,6 +139,52 @@ public class PayrollController : ControllerBase
         return File(bytes, "text/csv", fileName);
     }
 
+    /// <summary>
+    /// GET /api/payroll/attendance-export?year=&amp;month=&amp;cutoff= — bulk attendance
+    /// detail for the chosen cutoff as a CSV (one row per staff member per workday).
+    /// HR admin only.
+    /// </summary>
+    [HttpGet("attendance-export")]
+    [Authorize(Policy = "HrAdmin")]
+    public async Task<IActionResult> AttendanceExport([FromQuery] int? year, [FromQuery] int? month, [FromQuery] int? cutoff)
+    {
+        var today = PhClock.Today;
+        var period = PayrollService.ResolvePeriod(year ?? today.Year, month ?? today.Month, cutoff ?? PayrollService.DefaultCutoff(today));
+
+        var staff = await _payroll.GetStaffAsync();
+
+        var sb = new StringBuilder();
+        sb.Append("Pinoy Ride — Attendance ").Append(period.Cutoff == 1 ? "Cutoff 1 (11–25)" : "Cutoff 2 (26–10)")
+          .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
+          .AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("Employee,Email,Department,WorkDate,Weekday,Status,TimeIn,TimeOut,Hours,OvertimeHours,Setup");
+
+        foreach (var person in staff)
+        {
+            var slip = await _payroll.ComputeAsync(person, period);
+            foreach (var d in slip.Days)
+            {
+                sb.Append(Csv(person.FullName)).Append(',')
+                  .Append(Csv(person.Email)).Append(',')
+                  .Append(Csv(person.Department)).Append(',')
+                  .Append(Csv(d.Date.ToString("yyyy-MM-dd"))).Append(',')
+                  .Append(Csv(d.Weekday)).Append(',')
+                  .Append(Csv(d.Status)).Append(',')
+                  .Append(Csv(d.TimeIn?.ToString("yyyy-MM-dd HH:mm"))).Append(',')
+                  .Append(Csv(d.TimeOut?.ToString("yyyy-MM-dd HH:mm"))).Append(',')
+                  .Append(Csv(d.Hours?.ToString("0.00"))).Append(',')
+                  .Append(Csv(d.OvertimeHours?.ToString("0.00"))).Append(',')
+                  .Append(Csv(d.WorkSetup))
+                  .AppendLine();
+            }
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+        var fileName = $"attendance-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.csv";
+        return File(bytes, "text/csv", fileName);
+    }
+
     private static string Csv(object? value)
     {
         var s = value?.ToString() ?? "";
