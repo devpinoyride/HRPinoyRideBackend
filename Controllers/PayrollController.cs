@@ -59,6 +59,8 @@ public class PayrollController : ControllerBase
                 Position = person.Position,
                 Role = person.Role,
                 Status = person.Status,
+                SalaryMode = person.SalaryMode ?? "basic",
+                FixedSalary = person.FixedSalary && (person.SalaryMode ?? "basic") == "basic",
                 BasicSalary = person.BasicSalary,
                 Workdays = slip.Computation?.Workdays ?? 0,
                 WorkedDays = slip.Computation?.WorkedDays ?? 0,

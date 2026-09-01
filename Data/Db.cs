@@ -57,6 +57,8 @@ public class Db
             alter table public.profiles
                 add column if not exists work_days text not null default 'mon_fri'
                     check (work_days in ('mon_fri', 'mon_sat'));
+            alter table public.profiles
+                add column if not exists fixed_salary boolean not null default false;
 
             do $$
             begin

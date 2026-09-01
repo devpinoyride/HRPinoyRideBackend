@@ -73,6 +73,11 @@ alter table public.profiles add column if not exists mobile_incentive_amount  nu
 alter table public.profiles add column if not exists work_days text not null default 'mon_fri'
   check (work_days in ('mon_fri', 'mon_sat'));
 
+-- Fixed salary: when true, a monthly (basic) staff always receives their full
+-- semi-monthly basic with NO absence deduction, regardless of attendance.
+-- Only meaningful for salary_mode = 'basic'. Default false (attendance-based).
+alter table public.profiles add column if not exists fixed_salary boolean not null default false;
+
 create index if not exists profiles_approver_id_idx on public.profiles (approver_id);
 create index if not exists profiles_role_idx        on public.profiles (role);
 

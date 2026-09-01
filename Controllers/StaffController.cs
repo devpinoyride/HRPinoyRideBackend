@@ -50,7 +50,7 @@ public class StaffController : ControllerBase
                    p.approver_id, p.basic_salary, p.salary_mode, p.daily_rate,
                    p.office_incentive_enabled, p.office_incentive_amount,
                    p.mobile_incentive_enabled, p.mobile_incentive_amount,
-                   p.work_days,
+                   p.work_days, p.fixed_salary,
                    a.full_name as approver_name, p.created_at
             from profiles p
             left join profiles a on a.id = p.approver_id
@@ -130,9 +130,9 @@ public class StaffController : ControllerBase
             row = await con.QuerySingleAsync<Profile>(
                 """
                 insert into profiles (id, email, full_name, department, position, role, status, approver_id, basic_salary, salary_mode, daily_rate,
-                                      office_incentive_enabled, office_incentive_amount, mobile_incentive_enabled, mobile_incentive_amount, work_days)
+                                      office_incentive_enabled, office_incentive_amount, mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary)
                 values (@Id::uuid, @Email, @FullName, @Department, @Position, @Role::user_role, 'active', @ApproverId::uuid, @BasicSalary, @SalaryMode, @DailyRate,
-                        @OfficeIncentiveEnabled, @OfficeIncentiveAmount, @MobileIncentiveEnabled, @MobileIncentiveAmount, @WorkDays)
+                        @OfficeIncentiveEnabled, @OfficeIncentiveAmount, @MobileIncentiveEnabled, @MobileIncentiveAmount, @WorkDays, @FixedSalary)
                 returning *
                 """,
                 new
@@ -151,7 +151,8 @@ public class StaffController : ControllerBase
                     OfficeIncentiveAmount = request.OfficeIncentiveAmount ?? 100m,
                     MobileIncentiveEnabled = request.MobileIncentiveEnabled ?? true,
                     MobileIncentiveAmount = request.MobileIncentiveAmount ?? 100m,
-                    WorkDays = workDays
+                    WorkDays = workDays,
+                    FixedSalary = request.FixedSalary ?? false
                 }, tx);
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -215,7 +216,8 @@ public class StaffController : ControllerBase
                 office_incentive_amount = coalesce(@OfficeIncentiveAmount, office_incentive_amount),
                 mobile_incentive_enabled = coalesce(@MobileIncentiveEnabled, mobile_incentive_enabled),
                 mobile_incentive_amount = coalesce(@MobileIncentiveAmount, mobile_incentive_amount),
-                work_days = coalesce(nullif(@WorkDays, ''), work_days)
+                work_days = coalesce(nullif(@WorkDays, ''), work_days),
+                fixed_salary = coalesce(@FixedSalary, fixed_salary)
             where id = @Id::uuid
             returning *
             """,
@@ -233,7 +235,8 @@ public class StaffController : ControllerBase
                 OfficeIncentiveAmount = request.OfficeIncentiveAmount,
                 MobileIncentiveEnabled = request.MobileIncentiveEnabled,
                 MobileIncentiveAmount = request.MobileIncentiveAmount,
-                WorkDays = workDays ?? ""
+                WorkDays = workDays ?? "",
+                FixedSalary = request.FixedSalary
             }, tx);
 
         if (row is null)

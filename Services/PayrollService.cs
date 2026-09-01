@@ -133,7 +133,7 @@ public class PayrollService
             select id, email, full_name, department, position, role, status, approver_id, basic_salary,
                    salary_mode, daily_rate,
                    office_incentive_enabled, office_incentive_amount,
-                   mobile_incentive_enabled, mobile_incentive_amount, work_days
+                   mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary
             from profiles
             order by full_name asc
             """);
@@ -149,7 +149,7 @@ public class PayrollService
             select id, email, full_name, department, position, role, status, approver_id, basic_salary,
                    salary_mode, daily_rate,
                    office_incentive_enabled, office_incentive_amount,
-                   mobile_incentive_enabled, mobile_incentive_amount, work_days
+                   mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary
             from profiles
             where id = @Id::uuid
             """,
@@ -320,7 +320,14 @@ public class PayrollService
                     : PayrollDaysPerMonth;
                 dailyRate = Round(basic / daysPerMonth);
 
-                if (countedWorkdays == 0)
+                if (staff.FixedSalary)
+                {
+                    // Fixed-salary staff always receive their full semi-monthly basic,
+                    // regardless of attendance — no absence deduction, ever.
+                    semiMonthly = Round(basic / 2m);
+                    deduction = 0;
+                }
+                else if (countedWorkdays == 0)
                 {
                     // The cutoff has not started yet (all workdays are in the future).
                     // Nothing has been earned, so pay nothing rather than full basic.
@@ -331,11 +338,9 @@ public class PayrollService
                 {
                     semiMonthly = Round(basic / 2m);
 
-                    // Fixed-salary staff with zero clock-ins get no deduction; staff who
-                    // clock in but miss days are deducted for those absent days.
-                    deduction = (worked == 0 && paidLeave == 0)
-                        ? 0
-                        : Round(dailyRate * absent);
+                    // Absence deduction per absent workday. (Staff with zero clock-ins
+                    // are still deducted; use the Fixed salary flag to exempt them.)
+                    deduction = Round(dailyRate * absent);
                 }
             }
 
@@ -360,6 +365,7 @@ public class PayrollService
             {
                 SalaryMode = salaryMode,
                 WorkDayPattern = workDayPattern,
+                FixedSalary = staff.FixedSalary && salaryMode == "basic",
                 BasicSalary = staff.BasicSalary ?? 0,
                 DailyRate = dailyRate,
                 SemiMonthlyBasic = semiMonthly,

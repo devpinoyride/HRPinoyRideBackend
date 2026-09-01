@@ -19,6 +19,7 @@ public class Profile
     public bool MobileIncentiveEnabled { get; set; } = true;
     public decimal MobileIncentiveAmount { get; set; } = 100m;  // per week with ≥1 workday
     public string WorkDays { get; set; } = "mon_fri";           // 'mon_fri' or 'mon_sat'
+    public bool FixedSalary { get; set; }                       // basic mode: always full pay, no deduction
     public string? ApproverName { get; set; }
     public DateTime? CreatedAt { get; set; }
 }
@@ -95,6 +96,7 @@ public class PayrollComputation
 {
     public string? SalaryMode { get; set; }        // 'basic' or 'daily'
     public string? WorkDayPattern { get; set; }    // 'mon_fri' or 'mon_sat'
+    public bool FixedSalary { get; set; }
     public decimal BasicSalary { get; set; }
     public decimal DailyRate { get; set; }
     public decimal SemiMonthlyBasic { get; set; }
@@ -135,6 +137,7 @@ public class PayrollSummaryRow
     public string? Role { get; set; }
     public string? Status { get; set; }
     public string? SalaryMode { get; set; }
+    public bool FixedSalary { get; set; }
     public decimal? BasicSalary { get; set; }
     public int Workdays { get; set; }
     public int WorkedDays { get; set; }
