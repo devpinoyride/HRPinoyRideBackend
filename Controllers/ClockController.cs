@@ -125,6 +125,60 @@ public class ClockController : ControllerBase
         return Ok(row);
     }
 
+    /// <summary>POST /api/clock/undo — undo clock-out within the 5-minute grace period.</summary>
+    [HttpPost("undo")]
+    public async Task<IActionResult> UndoClockOut()
+    {
+        var uid = CurrentUserId();
+        var today = PhClock.Today;
+        var graceMinutes = 5;
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var row = await con.QuerySingleOrDefaultAsync<TimeEntry>(
+            """
+            select id, user_id, work_date, time_in, time_out,
+                   source::text as source, status::text as status, work_setup::text as work_setup
+            from time_entries
+            where user_id = @Uid::uuid and work_date = @Date
+            """,
+            new { Uid = uid, Date = today }, tx);
+
+        if (row is null)
+        {
+            return StatusCode(409, new { error = "You have not clocked in today." });
+        }
+
+        if (row.TimeOut is null)
+        {
+            return StatusCode(409, new { error = "You have not clocked out yet." });
+        }
+
+        var elapsed = DateTime.UtcNow - row.TimeOut.Value;
+        if (elapsed.TotalMinutes > graceMinutes)
+        {
+            return StatusCode(409, new { error = $"The {graceMinutes}-minute grace period has expired. Please submit a correction request instead." });
+        }
+
+        row = await con.QuerySingleAsync<TimeEntry>(
+            """
+            update time_entries
+            set time_out = null, updated_at = now()
+            where id = @Id
+            returning id, user_id, work_date, time_in, time_out,
+                      source::text as source, status::text as status, work_setup::text as work_setup,
+                      created_at, updated_at
+            """,
+            new { Id = row.Id }, tx);
+
+        await _audit.AddAsync(con, tx, uid, "undo_clock_out", "time_entries", row.Id.ToString(),
+            new { undone_at = DateTime.UtcNow, original_time_out = row.TimeOut });
+
+        tx.Commit();
+        return Ok(row);
+    }
+
     /// <summary>POST /api/clock/reset-today — dev-only: delete today's entry so the user can re-clock.</summary>
     [HttpPost("reset-today")]
     public async Task<IActionResult> ResetToday()

@@ -44,7 +44,10 @@ public class StaffController : ControllerBase
     {
         var sql = """
             select p.id, p.email, p.full_name, p.department, p.position, p.role, p.status,
-                   p.approver_id, p.basic_salary, a.full_name as approver_name, p.created_at
+                   p.approver_id, p.basic_salary, p.salary_mode, p.daily_rate,
+                   p.office_incentive_enabled, p.office_incentive_amount,
+                   p.mobile_incentive_enabled, p.mobile_incentive_amount,
+                   a.full_name as approver_name, p.created_at
             from profiles p
             left join profiles a on a.id = p.approver_id
             where 1 = 1
@@ -116,8 +119,10 @@ public class StaffController : ControllerBase
         {
             row = await con.QuerySingleAsync<Profile>(
                 """
-                insert into profiles (id, email, full_name, department, position, role, status, approver_id, basic_salary)
-                values (@Id::uuid, @Email, @FullName, @Department, @Position, @Role::user_role, 'active', @ApproverId::uuid, @BasicSalary)
+                insert into profiles (id, email, full_name, department, position, role, status, approver_id, basic_salary, salary_mode, daily_rate,
+                                      office_incentive_enabled, office_incentive_amount, mobile_incentive_enabled, mobile_incentive_amount)
+                values (@Id::uuid, @Email, @FullName, @Department, @Position, @Role::user_role, 'active', @ApproverId::uuid, @BasicSalary, @SalaryMode, @DailyRate,
+                        @OfficeIncentiveEnabled, @OfficeIncentiveAmount, @MobileIncentiveEnabled, @MobileIncentiveAmount)
                 returning *
                 """,
                 new
@@ -129,7 +134,13 @@ public class StaffController : ControllerBase
                     Position = request.Position?.Trim(),
                     Role = role,
                     ApproverId = request.ApproverId,
-                    BasicSalary = request.BasicSalary
+                    BasicSalary = request.BasicSalary,
+                    SalaryMode = request.SalaryMode ?? "basic",
+                    DailyRate = request.DailyRate,
+                    OfficeIncentiveEnabled = request.OfficeIncentiveEnabled ?? true,
+                    OfficeIncentiveAmount = request.OfficeIncentiveAmount ?? 100m,
+                    MobileIncentiveEnabled = request.MobileIncentiveEnabled ?? true,
+                    MobileIncentiveAmount = request.MobileIncentiveAmount ?? 100m
                 }, tx);
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -180,7 +191,13 @@ public class StaffController : ControllerBase
                 position = @Position,
                 role = coalesce(nullif(@Role, ''), role::text)::user_role,
                 approver_id = @ApproverId,
-                basic_salary = @BasicSalary
+                basic_salary = @BasicSalary,
+                salary_mode = @SalaryMode,
+                daily_rate = @DailyRate,
+                office_incentive_enabled = coalesce(@OfficeIncentiveEnabled, office_incentive_enabled),
+                office_incentive_amount = coalesce(@OfficeIncentiveAmount, office_incentive_amount),
+                mobile_incentive_enabled = coalesce(@MobileIncentiveEnabled, mobile_incentive_enabled),
+                mobile_incentive_amount = coalesce(@MobileIncentiveAmount, mobile_incentive_amount)
             where id = @Id::uuid
             returning *
             """,
@@ -191,7 +208,13 @@ public class StaffController : ControllerBase
                 Position = request.Position?.Trim(),
                 Role = role,
                 ApproverId = request.ApproverId,
-                BasicSalary = request.BasicSalary
+                BasicSalary = request.BasicSalary,
+                SalaryMode = request.SalaryMode ?? "basic",
+                DailyRate = request.DailyRate,
+                OfficeIncentiveEnabled = request.OfficeIncentiveEnabled,
+                OfficeIncentiveAmount = request.OfficeIncentiveAmount,
+                MobileIncentiveEnabled = request.MobileIncentiveEnabled,
+                MobileIncentiveAmount = request.MobileIncentiveAmount
             }, tx);
 
         if (row is null)

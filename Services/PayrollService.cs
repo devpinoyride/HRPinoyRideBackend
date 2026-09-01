@@ -11,15 +11,33 @@ namespace PinoyRideHrApi.Services;
 ///   cutoff 2 → 26th of the month – 10th of the next month
 ///
 /// Computation rules (shown on the payslip so they stay transparent):
+///
+/// BASIC mode (salary_mode = 'basic', the default):
 ///   daily rate         = basic salary ÷ 22
 ///   semi-monthly basic = basic salary ÷ 2
 ///   absence deduction  = daily rate × absent workdays (fixed-salary staff who
 ///                        clock in for zero days are not deducted)
 ///   overtime pay       = OT hours × (daily rate ÷ 8) × 1.25
-///   office allowance   = ₱100 × present office workdays
-///   mobile allowance   = ₱100 × number of weeks with ≥1 workday in the cutoff
+///   office incentive   = per-staff rate × present office workdays (₱0 if disabled)
+///   mobile incentive   = per-staff rate × weeks the staff actually worked
+///                        (present or paid leave; ₱0 if disabled)
 ///   net pay            = semi-monthly basic − absence deduction + overtime pay
-///                         + office allowance + mobile allowance
+///                         + office incentive + mobile incentive
+///
+/// DAILY mode (salary_mode = 'daily', for staff paid per day worked, e.g. ₱850/day):
+///   daily rate         = daily_rate field directly
+///   semi-monthly basic = daily rate × worked days (paid only for days worked)
+///   absence deduction  = none (daily-paid staff are not deducted for absences)
+///   overtime pay       = OT hours × (daily rate ÷ 8) × 1.25
+///   office incentive   = per-staff rate × present office workdays (₱0 if disabled)
+///   mobile incentive   = per-staff rate × weeks the staff actually worked
+///                        (present or paid leave; ₱0 if disabled)
+///   net pay            = semi-monthly basic + overtime pay
+///                         + office incentive + mobile incentive
+///
+/// Office and mobile incentives are configured per staff on the Staff page
+/// (toggle + editable peso amount); disabled incentives contribute ₱0 but are
+/// still shown on the payslip for transparency.
 ///
 /// Workdays are Monday–Friday. A workday is absent when the staff has neither
 /// a time_entries row nor an approved leave request covering it (approving a
@@ -38,12 +56,6 @@ public class PayrollService
 
     /// <summary>Overtime premium on ordinary workdays (PH Labor Code: +25%).</summary>
     public const decimal OvertimeMultiplier = 1.25m;
-
-    /// <summary>PHP allowance per office workday the staff was present.</summary>
-    public const decimal OfficeDailyAllowance = 100m;
-
-    /// <summary>PHP mobile/internet allowance per week with at least one workday in the cutoff.</summary>
-    public const decimal MobileWeeklyAllowance = 100m;
 
     private readonly Db _db;
 
@@ -111,7 +123,10 @@ public class PayrollService
         using var con = _db.Open();
         var rows = await con.QueryAsync<Profile>(
             """
-            select id, email, full_name, department, position, role, status, approver_id, basic_salary
+            select id, email, full_name, department, position, role, status, approver_id, basic_salary,
+                   salary_mode, daily_rate,
+                   office_incentive_enabled, office_incentive_amount,
+                   mobile_incentive_enabled, mobile_incentive_amount
             from profiles
             order by full_name asc
             """);
@@ -124,7 +139,10 @@ public class PayrollService
         using var con = _db.Open();
         return await con.QuerySingleOrDefaultAsync<Profile>(
             """
-            select id, email, full_name, department, position, role, status, approver_id, basic_salary
+            select id, email, full_name, department, position, role, status, approver_id, basic_salary,
+                   salary_mode, daily_rate,
+                   office_incentive_enabled, office_incentive_amount,
+                   mobile_incentive_enabled, mobile_incentive_amount
             from profiles
             where id = @Id::uuid
             """,
@@ -181,6 +199,11 @@ public class PayrollService
 
         var officeAllowanceDays = 0;  // office workdays the staff was present
 
+        // Mondays of the weeks in which the staff actually had a workday
+        // (present or on paid leave). Drives the mobile incentive so a week
+        // with no attendance never pays.
+        var activeWeekMondays = new HashSet<DateOnly>();
+
         foreach (var day in Workdays(period.Start, period.End))
         {
             string status;
@@ -195,6 +218,7 @@ public class PayrollService
                 {
                     status = "present";
                     worked++;
+                    activeWeekMondays.Add(WeekMonday(day));
                     var dayEntry = entries.FirstOrDefault(e => e.WorkDate == day);
                     if (dayEntry?.WorkSetup == "office")
                     {
@@ -205,6 +229,7 @@ public class PayrollService
                 {
                     status = "paid_leave";
                     paidLeave++;
+                    activeWeekMondays.Add(WeekMonday(day));
                 }
                 else
                 {
@@ -251,37 +276,65 @@ public class PayrollService
         }
 
         PayrollComputation? computation = null;
-        if (staff.BasicSalary.HasValue)
-                {
-            var basic = staff.BasicSalary.Value;
-            var dailyRate = Round(basic / PayrollDaysPerMonth);
-            var semiMonthly = Round(basic / 2m);
-            var hourlyRate = dailyRate / StandardDailyHours;
-            var overtimePay = Round((decimal)totalOvertimeHours * hourlyRate * OvertimeMultiplier);
 
-            // Office allowance: Php 100 per office workday the staff was present
-            var officeAllowance = Round(OfficeDailyAllowance * officeAllowanceDays);
+        var salaryMode = staff.SalaryMode ?? "basic";
+        var hasBasic = staff.BasicSalary.HasValue;
+        var hasDaily = staff.DailyRate.HasValue;
 
-            // Mobile allowance: Php 100 per week (Mon-Sun) with at least one workday in the cutoff
-            var weeksWithWorkdays = CountWeeksWithWorkdays(period.Start, period.End);
-            var mobileAllowance = Round(MobileWeeklyAllowance * weeksWithWorkdays);
-
-            // Absence deduction: fixed-salary staff with zero clock-ins get no deduction
-            // (they're treated as fixed-pay, not hourly). Staff who clock in but miss some
-            // days are still deducted for those absent days.
+        // Daily mode requires a daily_rate; basic mode requires a basic_salary.
+        // (A staff in daily mode may also have basic_salary set — ignored for payroll.)
+        if ((salaryMode == "daily" && hasDaily) || (salaryMode == "basic" && hasBasic))
+        {
+            decimal dailyRate;
+            decimal semiMonthly;
             decimal deduction;
-            if (worked == 0 && paidLeave == 0)
+
+            if (salaryMode == "daily")
             {
+                // DAILY mode: paid per day worked. Daily rate comes straight from the
+                // daily_rate field (e.g. ₱850/day). No absence deduction — they only
+                // earn on days they actually work.
+                var daily = staff.DailyRate!.Value;
+                dailyRate = Round(daily);
+                semiMonthly = Round(daily * worked);
                 deduction = 0;
             }
             else
             {
-                deduction = Round(dailyRate * absent);
+                // BASIC mode: monthly salary, paid semi-monthly. Daily rate is derived
+                // as basic ÷ 22; absence deduction applies per absent workday.
+                var basic = staff.BasicSalary!.Value;
+                dailyRate = Round(basic / PayrollDaysPerMonth);
+                semiMonthly = Round(basic / 2m);
+
+                // Fixed-salary staff with zero clock-ins get no deduction; staff who
+                // clock in but miss days are deducted for those absent days.
+                deduction = (worked == 0 && paidLeave == 0)
+                    ? 0
+                    : Round(dailyRate * absent);
             }
+
+            var hourlyRate = dailyRate / StandardDailyHours;
+            var overtimePay = Round((decimal)totalOvertimeHours * hourlyRate * OvertimeMultiplier);
+
+            // Office incentive: per-staff rate × office workdays the staff was present.
+            // Disabled → ₱0 (still shown on the payslip for transparency).
+            var officeRate = staff.OfficeIncentiveEnabled ? staff.OfficeIncentiveAmount : 0m;
+            var officeAllowance = Round(officeRate * officeAllowanceDays);
+
+            // Mobile incentive: per-staff rate × weeks (Mon–Sun) in which the staff
+            // actually had a workday (present or paid leave). A week with no
+            // attendance pays nothing. Disabled → ₱0 (still shown for transparency).
+            var weeksWithWorkdays = activeWeekMondays.Count;
+            var mobileRate = staff.MobileIncentiveEnabled ? staff.MobileIncentiveAmount : 0m;
+            var mobileAllowance = Round(mobileRate * weeksWithWorkdays);
+
+            var netPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance;
 
             computation = new PayrollComputation
             {
-                BasicSalary = basic,
+                SalaryMode = salaryMode,
+                BasicSalary = staff.BasicSalary ?? 0,
                 DailyRate = dailyRate,
                 SemiMonthlyBasic = semiMonthly,
                 Workdays = countedWorkdays,
@@ -291,9 +344,15 @@ public class PayrollService
                 AbsenceDeduction = deduction,
                 OvertimeHours = totalOvertimeHours,
                 OvertimePay = overtimePay,
+                OfficeIncentiveEnabled = staff.OfficeIncentiveEnabled,
+                OfficeIncentiveRate = officeRate,
+                OfficeIncentiveDays = officeAllowanceDays,
                 OfficeAllowance = officeAllowance,
+                MobileIncentiveEnabled = staff.MobileIncentiveEnabled,
+                MobileIncentiveRate = mobileRate,
+                MobileIncentiveWeeks = weeksWithWorkdays,
                 MobileAllowance = mobileAllowance,
-                NetPay = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance
+                NetPay = netPay
             };
         }
 
@@ -309,21 +368,7 @@ public class PayrollService
     private static decimal Round(decimal value) =>
         Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
-    /// <summary>
-    /// Counts how many distinct Monday–Sunday weeks contain at least one
-    /// workday (Mon–Fri) within the cutoff period. Used to compute the
-    /// Php 100-per-week mobile allowance.
-    /// </summary>
-    private static int CountWeeksWithWorkdays(DateOnly start, DateOnly end)
-    {
-        var workdays = Workdays(start, end);
-        var mondays = new HashSet<DateOnly>();
-        foreach (var d in workdays)
-        {
-            // Monday = start of the week (DayOfWeek.Monday == 1)
-            var monday = d.AddDays(-(int)d.DayOfWeek + (d.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
-            mondays.Add(monday);
-        }
-        return mondays.Count;
-    }
+    /// <summary>Monday that starts the Monday–Sunday week containing <paramref name="d"/>.</summary>
+    private static DateOnly WeekMonday(DateOnly d) =>
+        d.AddDays(-(int)d.DayOfWeek + (d.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
 }

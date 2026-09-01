@@ -136,10 +136,10 @@ DapperTypeHandlers.Register();
 
 var app = builder.Build();
 
-// Apply idempotent schema additions (profiles.basic_salary) so existing
-// databases gain the payroll columns without a manual SQL-editor step.
-// Failures are logged but do not stop the API; the payroll endpoints would
-// surface the underlying problem instead.
+// Apply idempotent schema additions (payroll salary + incentive columns,
+// time_entries.work_setup) so existing databases gain the payroll columns
+// without a manual SQL-editor step. Failures are logged but do not stop the
+// API; the payroll endpoints would surface the underlying problem instead.
 try
 {
     using (var scope = app.Services.CreateScope())
@@ -150,7 +150,7 @@ try
 }
 catch (Exception ex)
 {
-    app.Logger.LogWarning(ex, "Could not apply schema additions (profiles.basic_salary).");
+    app.Logger.LogWarning(ex, "Could not apply schema additions (payroll salary/incentive columns).");
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();

@@ -28,7 +28,8 @@ public class Db
     /// <summary>
     /// Idempotent schema additions for databases created before a feature
     /// shipped. schema.sql remains the full reference; this keeps existing
-    /// databases current without a manual SQL-editor step.
+    /// databases current without a manual SQL-editor step. Covers the payroll
+    /// salary columns, the per-staff incentive columns, and time_entries.work_setup.
     /// </summary>
     public async Task EnsureAdditionsAsync()
     {
@@ -37,6 +38,22 @@ public class Db
             """
             alter table public.profiles
                 add column if not exists basic_salary numeric(12, 2);
+
+            alter table public.profiles
+                add column if not exists salary_mode text not null default 'basic'
+                check (salary_mode in ('basic', 'daily'));
+
+            alter table public.profiles
+                add column if not exists daily_rate numeric(12, 2);
+
+            alter table public.profiles
+                add column if not exists office_incentive_enabled boolean not null default true;
+            alter table public.profiles
+                add column if not exists office_incentive_amount numeric(12, 2) not null default 100;
+            alter table public.profiles
+                add column if not exists mobile_incentive_enabled boolean not null default true;
+            alter table public.profiles
+                add column if not exists mobile_incentive_amount numeric(12, 2) not null default 100;
 
             do $$
             begin

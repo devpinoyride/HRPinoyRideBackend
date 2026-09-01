@@ -53,6 +53,19 @@ create table if not exists public.profiles (
 -- Payroll: monthly basic salary. Idempotent so databases created before this
 -- column existed gain it when schema.sql is re-run.
 alter table public.profiles add column if not exists basic_salary numeric(12,2);
+alter table public.profiles add column if not exists salary_mode text not null default 'basic'
+  check (salary_mode in ('basic', 'daily'));
+alter table public.profiles add column if not exists daily_rate numeric(12,2);
+
+-- Payroll incentives (per-staff configurable). Replaces the previously hardcoded
+-- ₱100 office/mobile allowance constants. Each incentive has an on/off toggle and
+-- an editable peso amount. Idempotent so existing databases gain them on re-run.
+--   office_incentive → paid per office workday the staff was present
+--   mobile_incentive → paid per week (Mon–Sun) with ≥1 workday in the cutoff
+alter table public.profiles add column if not exists office_incentive_enabled boolean not null default true;
+alter table public.profiles add column if not exists office_incentive_amount  numeric(12,2) not null default 100;
+alter table public.profiles add column if not exists mobile_incentive_enabled boolean not null default true;
+alter table public.profiles add column if not exists mobile_incentive_amount  numeric(12,2) not null default 100;
 
 create index if not exists profiles_approver_id_idx on public.profiles (approver_id);
 create index if not exists profiles_role_idx        on public.profiles (role);

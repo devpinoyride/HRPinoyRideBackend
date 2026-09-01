@@ -40,8 +40,14 @@ public class CreateStaffRequest
     public string? Department { get; set; }
     public string? Position { get; set; }
     public string? Role { get; set; }
-    public Guid? ApproverId { get; set; }
+        public Guid? ApproverId { get; set; }
     public decimal? BasicSalary { get; set; }
+    public string? SalaryMode { get; set; }        // 'basic' (default) or 'daily'
+    public decimal? DailyRate { get; set; }
+    public bool? OfficeIncentiveEnabled { get; set; }
+    public decimal? OfficeIncentiveAmount { get; set; }
+    public bool? MobileIncentiveEnabled { get; set; }
+    public decimal? MobileIncentiveAmount { get; set; }
 }
 
 public class UpdateStaffRequest
@@ -51,4 +57,10 @@ public class UpdateStaffRequest
     public string? Role { get; set; }
     public Guid? ApproverId { get; set; }
     public decimal? BasicSalary { get; set; }
+    public string? SalaryMode { get; set; }        // 'basic' (default) or 'daily'
+    public decimal? DailyRate { get; set; }
+    public bool? OfficeIncentiveEnabled { get; set; }
+    public decimal? OfficeIncentiveAmount { get; set; }
+    public bool? MobileIncentiveEnabled { get; set; }
+    public decimal? MobileIncentiveAmount { get; set; }
 }

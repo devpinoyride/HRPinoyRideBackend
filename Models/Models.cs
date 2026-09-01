@@ -10,7 +10,14 @@ public class Profile
     public string? Role { get; set; }
     public string? Status { get; set; }
     public Guid? ApproverId { get; set; }
-    public decimal? BasicSalary { get; set; }
+        public decimal? BasicSalary { get; set; }
+    public string? SalaryMode { get; set; }        // 'basic' (default) or 'daily'
+    public decimal? DailyRate { get; set; }
+    // Per-staff payroll incentives (configurable; replaces hardcoded ₱100 constants).
+    public bool OfficeIncentiveEnabled { get; set; } = true;
+    public decimal OfficeIncentiveAmount { get; set; } = 100m;  // per office workday present
+    public bool MobileIncentiveEnabled { get; set; } = true;
+    public decimal MobileIncentiveAmount { get; set; } = 100m;  // per week with ≥1 workday
     public string? ApproverName { get; set; }
     public DateTime? CreatedAt { get; set; }
 }
@@ -85,6 +92,7 @@ public class PayrollDayDetail
 
 public class PayrollComputation
 {
+    public string? SalaryMode { get; set; }        // 'basic' or 'daily'
     public decimal BasicSalary { get; set; }
     public decimal DailyRate { get; set; }
     public decimal SemiMonthlyBasic { get; set; }
@@ -95,7 +103,15 @@ public class PayrollComputation
     public decimal AbsenceDeduction { get; set; }
     public double OvertimeHours { get; set; }
     public decimal OvertimePay { get; set; }
+    // Office incentive (per office workday present)
+    public bool OfficeIncentiveEnabled { get; set; }
+    public decimal OfficeIncentiveRate { get; set; }
+    public int OfficeIncentiveDays { get; set; }
     public decimal OfficeAllowance { get; set; }
+    // Mobile incentive (per week with a workday)
+    public bool MobileIncentiveEnabled { get; set; }
+    public decimal MobileIncentiveRate { get; set; }
+    public int MobileIncentiveWeeks { get; set; }
     public decimal MobileAllowance { get; set; }
     public decimal NetPay { get; set; }
 }
@@ -116,6 +132,7 @@ public class PayrollSummaryRow
     public string? Position { get; set; }
     public string? Role { get; set; }
     public string? Status { get; set; }
+    public string? SalaryMode { get; set; }
     public decimal? BasicSalary { get; set; }
     public int Workdays { get; set; }
     public int WorkedDays { get; set; }
