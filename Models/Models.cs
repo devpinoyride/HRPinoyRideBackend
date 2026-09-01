@@ -18,6 +18,7 @@ public class Profile
     public decimal OfficeIncentiveAmount { get; set; } = 100m;  // per office workday present
     public bool MobileIncentiveEnabled { get; set; } = true;
     public decimal MobileIncentiveAmount { get; set; } = 100m;  // per week with ≥1 workday
+    public string WorkDays { get; set; } = "mon_fri";           // 'mon_fri' or 'mon_sat'
     public string? ApproverName { get; set; }
     public DateTime? CreatedAt { get; set; }
 }
@@ -93,6 +94,7 @@ public class PayrollDayDetail
 public class PayrollComputation
 {
     public string? SalaryMode { get; set; }        // 'basic' or 'daily'
+    public string? WorkDayPattern { get; set; }    // 'mon_fri' or 'mon_sat'
     public decimal BasicSalary { get; set; }
     public decimal DailyRate { get; set; }
     public decimal SemiMonthlyBasic { get; set; }

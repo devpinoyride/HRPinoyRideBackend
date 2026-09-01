@@ -39,7 +39,8 @@ namespace PinoyRideHrApi.Services;
 /// (toggle + editable peso amount); disabled incentives contribute ₱0 but are
 /// still shown on the payslip for transparency.
 ///
-/// Workdays are Monday–Friday. A workday is absent when the staff has neither
+/// Workdays follow each staff's work-week pattern (Mon–Fri or Mon–Sat).
+/// A workday is absent when the staff has neither
 /// a time_entries row nor an approved leave request covering it (approving a
 /// leave writes an 'adjusted' entry, so approved leave is never deducted).
 /// Overtime hours are counted only on workdays with an APPROVED overtime
@@ -48,8 +49,11 @@ namespace PinoyRideHrApi.Services;
 /// </summary>
 public class PayrollService
 {
-    /// <summary>Divisor for the daily rate (payroll days per month).</summary>
+    /// <summary>Divisor for the daily rate, Mon–Fri schedule (payroll days per month).</summary>
     public const int PayrollDaysPerMonth = 22;
+
+    /// <summary>Divisor for the daily rate, Mon–Sat schedule (payroll days per month).</summary>
+    public const int PayrollDaysPerMonthMonSat = 26;
 
     /// <summary>Standard paid hours in a workday (PH 8-hour day).</summary>
     public const decimal StandardDailyHours = 8m;
@@ -103,16 +107,19 @@ public class PayrollService
     /// <summary>Which cutoff is currently open (26th and later → cutoff 2).</summary>
     public static int DefaultCutoff(DateOnly today) => today.Day >= 26 ? 2 : 1;
 
-    /// <summary>Monday–Friday dates between the two dates, inclusive.</summary>
-    public static List<DateOnly> Workdays(DateOnly start, DateOnly end)
+    /// <summary>
+    /// Workday dates between the two dates, inclusive, according to the work-week
+    /// pattern: "mon_sat" counts Monday–Saturday, anything else Monday–Friday.
+    /// </summary>
+    public static List<DateOnly> Workdays(DateOnly start, DateOnly end, string workDays = "mon_fri")
     {
+        var includeSaturday = string.Equals(workDays, "mon_sat", StringComparison.OrdinalIgnoreCase);
         var days = new List<DateOnly>();
         for (var d = start; d <= end; d = d.AddDays(1))
         {
-            if (d.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday)
-            {
-                days.Add(d);
-            }
+            if (d.DayOfWeek == DayOfWeek.Sunday) continue;
+            if (d.DayOfWeek == DayOfWeek.Saturday && !includeSaturday) continue;
+            days.Add(d);
         }
         return days;
     }
@@ -126,7 +133,7 @@ public class PayrollService
             select id, email, full_name, department, position, role, status, approver_id, basic_salary,
                    salary_mode, daily_rate,
                    office_incentive_enabled, office_incentive_amount,
-                   mobile_incentive_enabled, mobile_incentive_amount
+                   mobile_incentive_enabled, mobile_incentive_amount, work_days
             from profiles
             order by full_name asc
             """);
@@ -142,7 +149,7 @@ public class PayrollService
             select id, email, full_name, department, position, role, status, approver_id, basic_salary,
                    salary_mode, daily_rate,
                    office_incentive_enabled, office_incentive_amount,
-                   mobile_incentive_enabled, mobile_incentive_amount
+                   mobile_incentive_enabled, mobile_incentive_amount, work_days
             from profiles
             where id = @Id::uuid
             """,
@@ -199,12 +206,14 @@ public class PayrollService
 
         var officeAllowanceDays = 0;  // office workdays the staff was present
 
+        var workDayPattern = staff.WorkDays ?? "mon_fri";
+
         // Mondays of the weeks in which the staff actually had a workday
         // (present or on paid leave). Drives the mobile incentive so a week
         // with no attendance never pays.
         var activeWeekMondays = new HashSet<DateOnly>();
 
-        foreach (var day in Workdays(period.Start, period.End))
+        foreach (var day in Workdays(period.Start, period.End, workDayPattern))
         {
             string status;
             if (day > today)
@@ -302,16 +311,32 @@ public class PayrollService
             else
             {
                 // BASIC mode: monthly salary, paid semi-monthly. Daily rate is derived
-                // as basic ÷ 22; absence deduction applies per absent workday.
+                // as basic ÷ (payroll days per month); absence deduction applies per
+                // absent workday. Mon–Sat schedules have more payroll days, so the
+                // divisor grows accordingly (keeps the per-day deduction fair).
                 var basic = staff.BasicSalary!.Value;
-                dailyRate = Round(basic / PayrollDaysPerMonth);
-                semiMonthly = Round(basic / 2m);
+                var daysPerMonth = string.Equals(workDayPattern, "mon_sat", StringComparison.OrdinalIgnoreCase)
+                    ? PayrollDaysPerMonthMonSat
+                    : PayrollDaysPerMonth;
+                dailyRate = Round(basic / daysPerMonth);
 
-                // Fixed-salary staff with zero clock-ins get no deduction; staff who
-                // clock in but miss days are deducted for those absent days.
-                deduction = (worked == 0 && paidLeave == 0)
-                    ? 0
-                    : Round(dailyRate * absent);
+                if (countedWorkdays == 0)
+                {
+                    // The cutoff has not started yet (all workdays are in the future).
+                    // Nothing has been earned, so pay nothing rather than full basic.
+                    semiMonthly = 0;
+                    deduction = 0;
+                }
+                else
+                {
+                    semiMonthly = Round(basic / 2m);
+
+                    // Fixed-salary staff with zero clock-ins get no deduction; staff who
+                    // clock in but miss days are deducted for those absent days.
+                    deduction = (worked == 0 && paidLeave == 0)
+                        ? 0
+                        : Round(dailyRate * absent);
+                }
             }
 
             var hourlyRate = dailyRate / StandardDailyHours;
@@ -334,6 +359,7 @@ public class PayrollService
             computation = new PayrollComputation
             {
                 SalaryMode = salaryMode,
+                WorkDayPattern = workDayPattern,
                 BasicSalary = staff.BasicSalary ?? 0,
                 DailyRate = dailyRate,
                 SemiMonthlyBasic = semiMonthly,

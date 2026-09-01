@@ -48,6 +48,7 @@ public class CreateStaffRequest
     public decimal? OfficeIncentiveAmount { get; set; }
     public bool? MobileIncentiveEnabled { get; set; }
     public decimal? MobileIncentiveAmount { get; set; }
+    public string? WorkDays { get; set; }              // 'mon_fri' or 'mon_sat'
 }
 
 public class UpdateStaffRequest
@@ -63,4 +64,5 @@ public class UpdateStaffRequest
     public decimal? OfficeIncentiveAmount { get; set; }
     public bool? MobileIncentiveEnabled { get; set; }
     public decimal? MobileIncentiveAmount { get; set; }
+    public string? WorkDays { get; set; }              // 'mon_fri' or 'mon_sat'
 }

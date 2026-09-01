@@ -67,6 +67,12 @@ alter table public.profiles add column if not exists office_incentive_amount  nu
 alter table public.profiles add column if not exists mobile_incentive_enabled boolean not null default true;
 alter table public.profiles add column if not exists mobile_incentive_amount  numeric(12,2) not null default 100;
 
+-- Work-week pattern per staff: which weekdays count as workdays for payroll.
+--   mon_fri → Monday–Friday (default)
+--   mon_sat → Monday–Saturday
+alter table public.profiles add column if not exists work_days text not null default 'mon_fri'
+  check (work_days in ('mon_fri', 'mon_sat'));
+
 create index if not exists profiles_approver_id_idx on public.profiles (approver_id);
 create index if not exists profiles_role_idx        on public.profiles (role);
 

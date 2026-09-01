@@ -17,6 +17,9 @@ public class StaffController : ControllerBase
     private static readonly HashSet<string> AllowedRoles =
         new(StringComparer.OrdinalIgnoreCase) { "employee", "approver", "hr_admin" };
 
+    private static readonly HashSet<string> AllowedWorkDays =
+        new(StringComparer.OrdinalIgnoreCase) { "mon_fri", "mon_sat" };
+
     private readonly Db _db;
     private readonly AuditService _audit;
     private readonly SupabaseAdminClient _supabaseAdmin;
@@ -47,6 +50,7 @@ public class StaffController : ControllerBase
                    p.approver_id, p.basic_salary, p.salary_mode, p.daily_rate,
                    p.office_incentive_enabled, p.office_incentive_amount,
                    p.mobile_incentive_enabled, p.mobile_incentive_amount,
+                   p.work_days,
                    a.full_name as approver_name, p.created_at
             from profiles p
             left join profiles a on a.id = p.approver_id
@@ -108,6 +112,12 @@ public class StaffController : ControllerBase
             return StatusCode(422, new { error = $"role must be one of: {string.Join(", ", AllowedRoles)}." });
         }
 
+        var workDays = (request.WorkDays ?? "mon_fri").Trim().ToLowerInvariant();
+        if (!AllowedWorkDays.Contains(workDays))
+        {
+            return StatusCode(422, new { error = $"workDays must be one of: {string.Join(", ", AllowedWorkDays)}." });
+        }
+
         var email = request.Email.Trim().ToLowerInvariant();
         var authId = await _supabaseAdmin.CreateUserAsync(email, request.Password);
 
@@ -120,9 +130,9 @@ public class StaffController : ControllerBase
             row = await con.QuerySingleAsync<Profile>(
                 """
                 insert into profiles (id, email, full_name, department, position, role, status, approver_id, basic_salary, salary_mode, daily_rate,
-                                      office_incentive_enabled, office_incentive_amount, mobile_incentive_enabled, mobile_incentive_amount)
+                                      office_incentive_enabled, office_incentive_amount, mobile_incentive_enabled, mobile_incentive_amount, work_days)
                 values (@Id::uuid, @Email, @FullName, @Department, @Position, @Role::user_role, 'active', @ApproverId::uuid, @BasicSalary, @SalaryMode, @DailyRate,
-                        @OfficeIncentiveEnabled, @OfficeIncentiveAmount, @MobileIncentiveEnabled, @MobileIncentiveAmount)
+                        @OfficeIncentiveEnabled, @OfficeIncentiveAmount, @MobileIncentiveEnabled, @MobileIncentiveAmount, @WorkDays)
                 returning *
                 """,
                 new
@@ -140,7 +150,8 @@ public class StaffController : ControllerBase
                     OfficeIncentiveEnabled = request.OfficeIncentiveEnabled ?? true,
                     OfficeIncentiveAmount = request.OfficeIncentiveAmount ?? 100m,
                     MobileIncentiveEnabled = request.MobileIncentiveEnabled ?? true,
-                    MobileIncentiveAmount = request.MobileIncentiveAmount ?? 100m
+                    MobileIncentiveAmount = request.MobileIncentiveAmount ?? 100m,
+                    WorkDays = workDays
                 }, tx);
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -181,6 +192,12 @@ public class StaffController : ControllerBase
             return StatusCode(422, new { error = $"role must be one of: {string.Join(", ", AllowedRoles)}." });
         }
 
+        var workDays = request.WorkDays?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(workDays) && !AllowedWorkDays.Contains(workDays))
+        {
+            return StatusCode(422, new { error = $"workDays must be one of: {string.Join(", ", AllowedWorkDays)}." });
+        }
+
         using var con = _db.Open();
         using var tx = con.BeginTransaction();
 
@@ -197,7 +214,8 @@ public class StaffController : ControllerBase
                 office_incentive_enabled = coalesce(@OfficeIncentiveEnabled, office_incentive_enabled),
                 office_incentive_amount = coalesce(@OfficeIncentiveAmount, office_incentive_amount),
                 mobile_incentive_enabled = coalesce(@MobileIncentiveEnabled, mobile_incentive_enabled),
-                mobile_incentive_amount = coalesce(@MobileIncentiveAmount, mobile_incentive_amount)
+                mobile_incentive_amount = coalesce(@MobileIncentiveAmount, mobile_incentive_amount),
+                work_days = coalesce(nullif(@WorkDays, ''), work_days)
             where id = @Id::uuid
             returning *
             """,
@@ -214,7 +232,8 @@ public class StaffController : ControllerBase
                 OfficeIncentiveEnabled = request.OfficeIncentiveEnabled,
                 OfficeIncentiveAmount = request.OfficeIncentiveAmount,
                 MobileIncentiveEnabled = request.MobileIncentiveEnabled,
-                MobileIncentiveAmount = request.MobileIncentiveAmount
+                MobileIncentiveAmount = request.MobileIncentiveAmount,
+                WorkDays = workDays ?? ""
             }, tx);
 
         if (row is null)
