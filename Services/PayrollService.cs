@@ -342,39 +342,44 @@ public class PayrollService
         }
 
         // ---- Sunday work (by request) --------------------------------------
-        // A Sunday is paid only when the staff both has a time entry AND an
-        // approved request covering that Sunday. Each qualifying Sunday pays a
-        // flat +1 daily rate (added on top of the base pay), regardless of
-        // salary mode. Sundays are never part of the Mon–Fri/Mon–Sat base.
-        var sundayDays = 0;
+        // Rest days = every calendar day in the period that is NOT part of the
+        // staff's work-week pattern (Mon–Fri → Sat+Sun rest; Mon–Sat → Sun rest).
+        // Every rest day is shown in the attendance detail tagged "rest_day" so
+        // it is tracked. A rest day is PAID a flat +1 daily rate only when the
+        // staff both has a time entry AND an approved request for it (worked by
+        // request), regardless of salary mode.
+        var workdaySet = Workdays(period.Start, period.End, workDayPattern).ToHashSet();
+        var sundayDays = 0;  // count of PAID worked rest days (drives rest-day pay)
         for (var d = period.Start; d <= period.End; d = d.AddDays(1))
         {
-            if (d.DayOfWeek != DayOfWeek.Sunday) continue;
-            if (d > today) continue;
-            var worksSunday = entryDates.Contains(d) && overtimeSet.Contains(d);
-            if (!worksSunday) continue;
+            if (workdaySet.Contains(d)) continue;  // it's a workday, already handled
+            if (d > today) continue;               // don't show future rest days as tracked
 
-            sundayDays++;
-            activeWeekMondays.Add(WeekMonday(d));
-            var sEntry = entries.FirstOrDefault(e => e.WorkDate == d);
-            if (sEntry?.WorkSetup == "office") officeAllowanceDays++;
+            var rEntry = entries.FirstOrDefault(e => e.WorkDate == d);
+            var workedRestDay = rEntry is not null && overtimeSet.Contains(d);
+            if (workedRestDay)
+            {
+                sundayDays++;
+                activeWeekMondays.Add(WeekMonday(d));
+                if (rEntry?.WorkSetup == "office") officeAllowanceDays++;
+            }
 
+            var rIn = PhClock.ToLocal(rEntry?.TimeIn);
+            var rOut = PhClock.ToLocal(rEntry?.TimeOut);
             days.Add(new PayrollDayDetail
             {
                 Date = d,
                 Weekday = d.ToString("dddd"),
-                Status = "sunday",
-                TimeIn = PhClock.ToLocal(sEntry?.TimeIn),
-                TimeOut = PhClock.ToLocal(sEntry?.TimeOut),
-                Source = sEntry?.Source,
-                WorkSetup = sEntry?.WorkSetup,
-                Hours = (sEntry?.TimeIn is not null && sEntry?.TimeOut is not null)
-                    ? Math.Round((PhClock.ToLocal(sEntry.TimeOut)!.Value - PhClock.ToLocal(sEntry.TimeIn)!.Value).TotalHours, 2)
-                    : null,
+                Status = "rest_day",
+                TimeIn = rIn,
+                TimeOut = rOut,
+                Source = rEntry?.Source,
+                WorkSetup = rEntry?.WorkSetup,
+                Hours = (rIn.HasValue && rOut.HasValue) ? Math.Round((rOut.Value - rIn.Value).TotalHours, 2) : null,
                 OvertimeHours = null
             });
         }
-        // Keep the day list in date order (Sundays were appended at the end).
+        // Keep the day list in date order (rest days were appended at the end).
         days = days.OrderBy(x => x.Date).ToList();
 
         PayrollComputation? computation = null;
