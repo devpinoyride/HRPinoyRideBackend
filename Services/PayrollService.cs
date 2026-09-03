@@ -353,10 +353,11 @@ public class PayrollService
         for (var d = period.Start; d <= period.End; d = d.AddDays(1))
         {
             if (workdaySet.Contains(d)) continue;  // it's a workday, already handled
-            if (d > today) continue;               // don't show future rest days as tracked
 
+            // Every rest day is shown (past or future). Pay only applies when it
+            // was actually worked by request — impossible for a future date.
             var rEntry = entries.FirstOrDefault(e => e.WorkDate == d);
-            var workedRestDay = rEntry is not null && overtimeSet.Contains(d);
+            var workedRestDay = d <= today && rEntry is not null && overtimeSet.Contains(d);
             if (workedRestDay)
             {
                 sundayDays++;
