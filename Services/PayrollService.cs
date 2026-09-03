@@ -238,16 +238,28 @@ public class PayrollService
             else
             {
                 countedWorkdays++;
-                if (entryDates.Contains(day))
+                var dayEntry = entries.FirstOrDefault(e => e.WorkDate == day);
+                var hasEntry = dayEntry is not null;
+                // An entry with a clock-in but NO clock-out is incomplete — it
+                // counts as ABSENT ("no clock out") until the staff files an
+                // approved correction. Only a complete in+out entry is "present".
+                var hasClockOut = dayEntry?.TimeOut is not null;
+
+                if (hasEntry && hasClockOut)
                 {
                     status = "present";
                     worked++;
                     activeWeekMondays.Add(WeekMonday(day));
-                    var dayEntry = entries.FirstOrDefault(e => e.WorkDate == day);
                     if (dayEntry?.WorkSetup == "office")
                     {
                         officeAllowanceDays++;
                     }
+                }
+                else if (hasEntry && !hasClockOut)
+                {
+                    // Clocked in but never clocked out → treated as absent.
+                    status = "no_clock_out";
+                    absent++;
                 }
                 else if (leaveSet.Contains(day))
                 {
