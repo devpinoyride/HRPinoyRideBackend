@@ -67,6 +67,8 @@ public class Db
             alter table public.timekeeping_requests
                 add column if not exists leave_duration text
                     check (leave_duration is null or leave_duration in ('whole', 'half_am', 'half_pm'));
+            alter table public.timekeeping_requests
+                add column if not exists work_setup public.work_setup;
 
             do $$
             begin

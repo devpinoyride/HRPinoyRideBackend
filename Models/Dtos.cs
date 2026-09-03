@@ -39,6 +39,7 @@ public class CreateRequestRequest
     public string? RequestType { get; set; }
     public string? Reason { get; set; }
     public string? LeaveDuration { get; set; }   // leave only: 'whole' | 'half_am' | 'half_pm'
+    public string? WorkSetup { get; set; }        // adjustment/overtime: 'office' | 'wfh'
 }
 
 public class ResolveRequestRequest

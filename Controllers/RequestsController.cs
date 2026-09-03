@@ -99,6 +99,19 @@ public class RequestsController : ControllerBase
             return StatusCode(422, new { error = "work_date cannot be in the future for this request type." });
         }
 
+        // Adjustment / overtime carry the work setup the approved entry should use.
+        string? workSetup = null;
+        var writesEntryType = string.Equals(type, "adjustment", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(type, "overtime", StringComparison.OrdinalIgnoreCase);
+        if (writesEntryType)
+        {
+            workSetup = (request.WorkSetup ?? "office").Trim().ToLowerInvariant();
+            if (workSetup is not ("office" or "wfh"))
+            {
+                return StatusCode(422, new { error = "workSetup must be 'office' or 'wfh'." });
+            }
+        }
+
         var uid = CurrentUserId();
         using var con = _db.Open();
         using var tx = con.BeginTransaction();
@@ -114,9 +127,9 @@ public class RequestsController : ControllerBase
         var row = await con.QuerySingleAsync<TimekeepingRequest>(
             """
             insert into timekeeping_requests
-                (user_id, work_date, requested_time_in, requested_time_out, request_type, reason, leave_duration, approver_id, status)
+                (user_id, work_date, requested_time_in, requested_time_out, request_type, reason, leave_duration, work_setup, approver_id, status)
             values
-                (@Uid::uuid, @WorkDate, @In::time, @Out::time, @Type::request_type, @Reason, @LeaveDuration, @ApproverId::uuid, 'pending')
+                (@Uid::uuid, @WorkDate, @In::time, @Out::time, @Type::request_type, @Reason, @LeaveDuration, @WorkSetup::work_setup, @ApproverId::uuid, 'pending')
             returning *
             """,
             new
@@ -128,6 +141,7 @@ public class RequestsController : ControllerBase
                 Type = type,
                 Reason = request.Reason.Trim(),
                 LeaveDuration = leaveDuration,
+                WorkSetup = workSetup,
                 ApproverId = me.ApproverId
             }, tx);
 

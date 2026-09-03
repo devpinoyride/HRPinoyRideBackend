@@ -119,16 +119,21 @@ public class ApprovalsController : ControllerBase
 
         if (writesTimeEntry)
         {
+            // The entry's work setup comes from the request (office/wfh); default
+            // to office if the request predates this field.
+            var setup = string.IsNullOrWhiteSpace(req.WorkSetup) ? "office" : req.WorkSetup;
+
             var entry = await con.QuerySingleAsync<TimeEntry>(
                 """
-                insert into time_entries (user_id, work_date, time_in, time_out, source, status)
-                values (@UserId::uuid, @WorkDate, @In, @Out, 'adjusted', 'confirmed')
+                insert into time_entries (user_id, work_date, time_in, time_out, source, status, work_setup)
+                values (@UserId::uuid, @WorkDate, @In, @Out, 'adjusted', 'confirmed', @Setup::work_setup)
                 on conflict (user_id, work_date)
                 do update set
                     time_in = excluded.time_in,
                     time_out = excluded.time_out,
                     source = 'adjusted',
                     status = 'confirmed',
+                    work_setup = excluded.work_setup,
                     updated_at = now()
                 returning id, user_id, work_date, time_in, time_out,
                           source::text as source, status::text as status, work_setup::text as work_setup,
@@ -139,7 +144,8 @@ public class ApprovalsController : ControllerBase
                     UserId = req.UserId,
                     WorkDate = req.WorkDate,
                     In = req.RequestedTimeIn.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeIn.Value) : (DateTime?)null,
-                    Out = req.RequestedTimeOut.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeOut.Value) : (DateTime?)null
+                    Out = req.RequestedTimeOut.HasValue ? PhClock.Combine(req.WorkDate, req.RequestedTimeOut.Value) : (DateTime?)null,
+                    Setup = setup
                 }, tx);
 
             await _audit.AddAsync(con, tx, uid, "adjust_time_entry", "time_entries", entry.Id.ToString(),

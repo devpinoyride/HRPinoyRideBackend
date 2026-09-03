@@ -128,6 +128,10 @@ create table if not exists public.timekeeping_requests (
 alter table public.timekeeping_requests add column if not exists leave_duration text
   check (leave_duration is null or leave_duration in ('whole', 'half_am', 'half_pm'));
 
+-- Work setup for adjustment/overtime requests: the office/WFH setup the
+-- approved time entry should carry (so an adjustment isn't forced to office).
+alter table public.timekeeping_requests add column if not exists work_setup public.work_setup;
+
 create index if not exists timekeeping_requests_approver_status_idx on public.timekeeping_requests (approver_id, status);
 create index if not exists timekeeping_requests_user_idx            on public.timekeeping_requests (user_id);
 create index if not exists timekeeping_requests_work_date_idx       on public.timekeeping_requests (work_date);
