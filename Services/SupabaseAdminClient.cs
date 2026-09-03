@@ -57,6 +57,33 @@ public class SupabaseAdminClient
         throw new ApiException(500, "Supabase did not return a user id for the new account.");
     }
 
+    /// <summary>Sets a new password for an existing auth user (admin API).</summary>
+    public async Task SetPasswordAsync(Guid userId, string newPassword, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_opts.Url) || string.IsNullOrWhiteSpace(_opts.ServiceRoleKey))
+        {
+            throw new ApiException(500, "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured.");
+        }
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"{_opts.Url.TrimEnd('/')}/auth/v1/admin/users/{userId}")
+        {
+            Content = JsonContent.Create(new { password = newPassword })
+        };
+        request.Headers.Add("apikey", _opts.ServiceRoleKey);
+        request.Headers.Add("Authorization", $"Bearer {_opts.ServiceRoleKey}");
+
+        using var response = await _http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Supabase admin set password failed: {Code} {Body}", response.StatusCode, body);
+            throw new ApiException(400, ExtractErrorMessage(body, "Failed to update the password."));
+        }
+    }
+
     private static string ExtractErrorMessage(string body, string fallback)
     {
         try

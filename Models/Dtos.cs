@@ -18,6 +18,19 @@ public class ClockInRequest
     public string? WorkSetup { get; set; }
 }
 
+// HR admin resets a staff member's password to a new temporary one.
+public class ResetPasswordRequest
+{
+    public string? NewPassword { get; set; }
+}
+
+// Employee changes their own password (verifies the current one first).
+public class ChangePasswordRequest
+{
+    public string? CurrentPassword { get; set; }
+    public string? NewPassword { get; set; }
+}
+
 public class CreateRequestRequest
 {
     public string? WorkDate { get; set; }

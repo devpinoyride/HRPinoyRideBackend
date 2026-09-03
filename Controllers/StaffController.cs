@@ -312,4 +312,42 @@ public class StaffController : ControllerBase
         tx.Commit();
         return Ok(row);
     }
+
+    /// <summary>
+    /// POST /api/staff/{id}/reset-password — HR admin sets a new temporary
+    /// password for a staff member (e.g. when they forgot theirs). Returns the
+    /// new password so HR can hand it off; the staff should change it after.
+    /// </summary>
+    [HttpPost("{id:guid}/reset-password")]
+    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] ResetPasswordRequest? request)
+    {
+        var uid = CurrentUserId();
+
+        var newPassword = request?.NewPassword?.Trim();
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 8)
+        {
+            return StatusCode(422, new { error = "newPassword must be at least 8 characters." });
+        }
+
+        using var con = _db.Open();
+        var target = await con.QuerySingleOrDefaultAsync<Profile>(
+            "select id, email, full_name from profiles where id = @Id::uuid",
+            new { Id = id });
+        if (target is null)
+        {
+            throw new ApiException(404, "Staff member not found.");
+        }
+
+        // Update the Supabase Auth password via the admin API.
+        await _supabaseAdmin.SetPasswordAsync(id, newPassword);
+
+        using (var tx = con.BeginTransaction())
+        {
+            await _audit.AddAsync(con, tx, uid, "reset_password", "profiles", id.ToString(),
+                new { user_id = id, email = target.Email });
+            tx.Commit();
+        }
+
+        return Ok(new { email = target.Email, fullName = target.FullName, newPassword });
+    }
 }

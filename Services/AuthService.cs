@@ -15,16 +15,44 @@ namespace PinoyRideHrApi.Services;
 public class AuthService
 {
     private readonly SupabaseAuthClient _supabaseAuth;
+    private readonly SupabaseAdminClient _supabaseAdmin;
     private readonly Db _db;
     private readonly JwtOptions _jwt;
     private readonly ILogger<AuthService> _logger;
 
-    public AuthService(SupabaseAuthClient supabaseAuth, Db db, JwtOptions jwt, ILogger<AuthService> logger)
+    public AuthService(SupabaseAuthClient supabaseAuth, SupabaseAdminClient supabaseAdmin, Db db, JwtOptions jwt, ILogger<AuthService> logger)
     {
         _supabaseAuth = supabaseAuth;
+        _supabaseAdmin = supabaseAdmin;
         _db = db;
         _jwt = jwt;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Changes the password for the given user after verifying their current
+    /// password. Returns false if the current password is wrong or the user is
+    /// unknown; throws (via the admin client) if the update itself fails.
+    /// </summary>
+    public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct = default)
+    {
+        using var con = _db.Open();
+        var email = await con.QuerySingleOrDefaultAsync<string?>(
+            "select email from profiles where id = @Id::uuid", new { Id = userId });
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return false;
+        }
+
+        // Verify the current password by attempting a Supabase token exchange.
+        var verifiedId = await _supabaseAuth.GetUserIdAsync(email, currentPassword, ct);
+        if (verifiedId is null || !string.Equals(verifiedId, userId.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        await _supabaseAdmin.SetPasswordAsync(userId, newPassword, ct);
+        return true;
     }
 
     public async Task<LoginResponse?> LoginAsync(string email, string password, CancellationToken ct = default)

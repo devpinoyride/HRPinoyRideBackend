@@ -84,6 +84,7 @@ public class ReportsController : ControllerBase
             from time_entries te
             join profiles p on p.id = te.user_id
             where te.work_date between @From and @To
+              and p.role <> 'hr_admin'
             """;
         var parameters = new DynamicParameters();
         parameters.Add("From", from);
@@ -113,6 +114,7 @@ public class ReportsController : ControllerBase
             from timekeeping_requests r
             join profiles p on p.id = r.user_id
             where r.work_date between @From and @To
+              and p.role <> 'hr_admin'
             """;
         var parameters = new DynamicParameters();
         parameters.Add("From", from);
