@@ -150,4 +150,35 @@ create table if not exists public.audit_log (
 create index if not exists audit_log_actor_idx    on public.audit_log (actor_id);
 create index if not exists audit_log_created_idx  on public.audit_log (created_at desc);
 
+-- ---- payroll finalization (paid payslips) ---------------------------------
+-- A finalized cutoff is a locked payroll period. Finalizing snapshots every
+-- staff member's computed payslip so later config/time changes never alter a
+-- paid period. Finalization is permanent (no reopen).
+create table if not exists public.payroll_periods (
+  id            bigserial primary key,
+  year          int  not null,
+  month         int  not null,
+  cutoff        int  not null check (cutoff in (1, 2)),
+  status        text not null default 'finalized' check (status in ('finalized')),
+  finalized_by  uuid references public.profiles (id),
+  finalized_at  timestamptz not null default now(),
+  constraint payroll_periods_key unique (year, month, cutoff)
+);
+
+-- One frozen payslip per staff per finalized period. `payslip` holds the full
+-- computed PayrollPayslip (staff snapshot + computation + attendance days) as
+-- JSON so it renders identically forever, independent of current config.
+create table if not exists public.payslip_snapshots (
+  id           bigserial primary key,
+  period_id    bigint not null references public.payroll_periods (id) on delete cascade,
+  user_id      uuid   not null references public.profiles (id) on delete cascade,
+  full_name    text,
+  net_pay      numeric(12, 2),
+  payslip      jsonb  not null,
+  created_at   timestamptz not null default now(),
+  constraint payslip_snapshots_key unique (period_id, user_id)
+);
+
+create index if not exists payslip_snapshots_user_idx on public.payslip_snapshots (user_id);
+
 commit;

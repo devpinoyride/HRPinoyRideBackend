@@ -70,6 +70,28 @@ public class Db
             alter table public.timekeeping_requests
                 add column if not exists work_setup public.work_setup;
 
+            create table if not exists public.payroll_periods (
+                id bigserial primary key,
+                year int not null,
+                month int not null,
+                cutoff int not null check (cutoff in (1, 2)),
+                status text not null default 'finalized' check (status in ('finalized')),
+                finalized_by uuid references public.profiles (id),
+                finalized_at timestamptz not null default now(),
+                constraint payroll_periods_key unique (year, month, cutoff)
+            );
+
+            create table if not exists public.payslip_snapshots (
+                id bigserial primary key,
+                period_id bigint not null references public.payroll_periods (id) on delete cascade,
+                user_id uuid not null references public.profiles (id) on delete cascade,
+                full_name text,
+                net_pay numeric(12, 2),
+                payslip jsonb not null,
+                created_at timestamptz not null default now(),
+                constraint payslip_snapshots_key unique (period_id, user_id)
+            );
+
             do $$
             begin
               if not exists (select 1 from pg_type where typname = 'work_setup') then

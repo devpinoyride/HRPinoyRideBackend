@@ -46,8 +46,48 @@ public class PayrollController : ControllerBase
         var today = PhClock.Today;
         var period = PayrollService.ResolvePeriod(year ?? today.Year, month ?? today.Month, cutoff ?? PayrollService.DefaultCutoff(today));
 
+        var finalized = await _payroll.IsFinalizedAsync(period);
+
+        // A finalized cutoff renders from frozen snapshots, not a live recompute.
+        var slips = finalized
+            ? await _payroll.GetSnapshotsAsync(period)
+            : null;
+
+        var rows = new List<PayrollSummaryRow>();
+        if (finalized && slips is not null)
+        {
+            foreach (var slip in slips)
+            {
+                var c = slip.Computation;
+                rows.Add(new PayrollSummaryRow
+                {
+                    StaffId = slip.Staff.Id,
+                    FullName = slip.Staff.FullName,
+                    Department = slip.Staff.Department,
+                    Position = slip.Staff.Position,
+                    Role = slip.Staff.Role,
+                    Status = slip.Staff.Status,
+                    SalaryMode = c?.SalaryMode ?? "basic",
+                    FixedSalary = c?.FixedSalary ?? false,
+                    BasicSalary = c is null ? null : c.BasicSalary,
+                    Workdays = c?.Workdays ?? 0,
+                    WorkedDays = c?.WorkedDays ?? 0,
+                    PaidLeaveDays = c?.PaidLeaveDays ?? 0,
+                    AbsentDays = c?.AbsentDays ?? 0,
+                    DailyRate = c?.DailyRate,
+                    SemiMonthlyBasic = c?.SemiMonthlyBasic,
+                    AbsenceDeduction = c?.AbsenceDeduction,
+                    OvertimeHours = c?.OvertimeHours ?? 0,
+                    OvertimePay = c?.OvertimePay,
+                    OfficeAllowance = c?.OfficeAllowance,
+                    MobileAllowance = c?.MobileAllowance,
+                    NetPay = c?.NetPay
+                });
+            }
+            return Ok(new { period, rows, finalized });
+        }
+
         var staff = await _payroll.GetStaffAsync();
-        var rows = new List<PayrollSummaryRow>(staff.Count);
         foreach (var person in staff)
         {
             var slip = await _payroll.ComputeAsync(person, period);
@@ -77,7 +117,23 @@ public class PayrollController : ControllerBase
             });
         }
 
-        return Ok(new { period, rows });
+        return Ok(new { period, rows, finalized });
+    }
+
+    /// <summary>
+    /// POST /api/payroll/finalize?year=&amp;month=&amp;cutoff= — closes a cutoff:
+    /// snapshots every staff payslip and locks the period permanently. HR admin only.
+    /// </summary>
+    [HttpPost("finalize")]
+    [Authorize(Policy = "HrAdmin")]
+    public async Task<IActionResult> Finalize([FromQuery] int? year, [FromQuery] int? month, [FromQuery] int? cutoff)
+    {
+        var uid = CurrentUserId();
+        var today = PhClock.Today;
+        var period = PayrollService.ResolvePeriod(year ?? today.Year, month ?? today.Month, cutoff ?? PayrollService.DefaultCutoff(today));
+
+        await _payroll.FinalizeAsync(period, uid);
+        return Ok(new { period, finalized = true, message = "Cutoff finalized. Payslips are now locked." });
     }
 
     /// <summary>
@@ -92,20 +148,37 @@ public class PayrollController : ControllerBase
         var today = PhClock.Today;
         var period = PayrollService.ResolvePeriod(year ?? today.Year, month ?? today.Month, cutoff ?? PayrollService.DefaultCutoff(today));
 
-        var staff = await _payroll.GetStaffAsync();
+        // Finalized → export the frozen snapshots; otherwise compute live.
+        var finalized = await _payroll.IsFinalizedAsync(period);
+        var snapshotSlips = finalized ? await _payroll.GetSnapshotsAsync(period) : null;
+        var staff = finalized ? new List<Profile>() : await _payroll.GetStaffAsync();
 
         var sb = new StringBuilder();
         // Human-readable header block so the exported file documents the cutoff.
-        sb.Append("Pinoy Ride — Payroll ").Append(period.Cutoff == 1 ? "Cutoff 1 (11–25)" : "Cutoff 2 (26–10)")
+        sb.Append("Pinoy Ride — Payroll ").Append(period.Cutoff == 1 ? "Cutoff 1 (1–15)" : "Cutoff 2 (16–end of month)")
           .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
           .AppendLine();
         sb.AppendLine();
         sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,SundayDays,SundayPay,NetPay");
 
-        decimal totalNet = 0m;
-        foreach (var person in staff)
+        // Unified list of payslips to export: snapshots (finalized) or live compute.
+        var exportSlips = new List<PayrollPayslip>();
+        if (finalized && snapshotSlips is not null)
         {
-            var slip = await _payroll.ComputeAsync(person, period);
+            exportSlips.AddRange(snapshotSlips);
+        }
+        else
+        {
+            foreach (var person in staff)
+            {
+                exportSlips.Add(await _payroll.ComputeAsync(person, period));
+            }
+        }
+
+        decimal totalNet = 0m;
+        foreach (var slip in exportSlips)
+        {
+            var person = slip.Staff;
             var c = slip.Computation;
             totalNet += c?.NetPay ?? 0m;
 
@@ -155,18 +228,30 @@ public class PayrollController : ControllerBase
         var today = PhClock.Today;
         var period = PayrollService.ResolvePeriod(year ?? today.Year, month ?? today.Month, cutoff ?? PayrollService.DefaultCutoff(today));
 
-        var staff = await _payroll.GetStaffAsync();
+        var finalized = await _payroll.IsFinalizedAsync(period);
+        var attSlips = new List<PayrollPayslip>();
+        if (finalized)
+        {
+            attSlips.AddRange(await _payroll.GetSnapshotsAsync(period));
+        }
+        else
+        {
+            foreach (var person in await _payroll.GetStaffAsync())
+            {
+                attSlips.Add(await _payroll.ComputeAsync(person, period));
+            }
+        }
 
         var sb = new StringBuilder();
-        sb.Append("Pinoy Ride — Attendance ").Append(period.Cutoff == 1 ? "Cutoff 1 (11–25)" : "Cutoff 2 (26–10)")
+        sb.Append("Pinoy Ride — Attendance ").Append(period.Cutoff == 1 ? "Cutoff 1 (1–15)" : "Cutoff 2 (16–end of month)")
           .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
           .AppendLine();
         sb.AppendLine();
         sb.AppendLine("Employee,Email,Department,WorkDate,Weekday,Status,TimeIn,TimeOut,Hours,OvertimeHours,Setup");
 
-        foreach (var person in staff)
+        foreach (var slip in attSlips)
         {
-            var slip = await _payroll.ComputeAsync(person, period);
+            var person = slip.Staff;
             foreach (var d in slip.Days)
             {
                 sb.Append(Csv(person.FullName)).Append(',')
@@ -222,6 +307,13 @@ public class PayrollController : ControllerBase
             {
                 throw new ApiException(403, "You can only view payslips for your own account or your assigned staff.");
             }
+        }
+
+        // Finalized period → return the frozen snapshot (immutable), if one exists.
+        var snapshot = await _payroll.GetSnapshotAsync(period, target);
+        if (snapshot is not null)
+        {
+            return Ok(snapshot);
         }
 
         var staff = await _payroll.GetStaffAsync(target);

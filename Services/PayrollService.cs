@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dapper;
 using PinoyRideHrApi.Data;
 using PinoyRideHrApi.Infrastructure;
@@ -521,6 +522,110 @@ public class PayrollService
             Days = days,
             Computation = computation
         };
+    }
+
+    // ---- Payroll finalization (paid, locked payslips) ---------------------
+
+    private static readonly JsonSerializerOptions SnapshotJson = new(JsonSerializerDefaults.Web);
+
+    /// <summary>True when the given cutoff has been finalized (locked/paid).</summary>
+    public async Task<bool> IsFinalizedAsync(PayrollPeriod period)
+    {
+        using var con = _db.Open();
+        var id = await con.QuerySingleOrDefaultAsync<long?>(
+            "select id from payroll_periods where year=@Y and month=@M and cutoff=@C",
+            new { Y = period.Year, M = period.Month, C = period.Cutoff });
+        return id.HasValue;
+    }
+
+    /// <summary>
+    /// Finalizes a cutoff: computes every eligible staff member's payslip and
+    /// stores it as an immutable snapshot, then marks the period locked.
+    /// Throws if the period is already finalized (no reopen).
+    /// </summary>
+    public async Task FinalizeAsync(PayrollPeriod period, Guid byUserId)
+    {
+        using var con = _db.Open();
+
+        var already = await con.QuerySingleOrDefaultAsync<long?>(
+            "select id from payroll_periods where year=@Y and month=@M and cutoff=@C",
+            new { Y = period.Year, M = period.Month, C = period.Cutoff });
+        if (already.HasValue)
+        {
+            throw new ApiException(409, "This cutoff has already been finalized and cannot be changed.");
+        }
+
+        // Compute every eligible staff member's payslip up front (uses its own
+        // connections), so the write transaction stays short.
+        var staff = await GetStaffAsync();
+        var slips = new List<(Profile person, PayrollPayslip slip)>();
+        foreach (var person in staff)
+        {
+            slips.Add((person, await ComputeAsync(person, period)));
+        }
+
+        using var tx = con.BeginTransaction();
+
+        var periodId = await con.QuerySingleAsync<long>(
+            """
+            insert into payroll_periods (year, month, cutoff, status, finalized_by)
+            values (@Y, @M, @C, 'finalized', @By::uuid)
+            returning id
+            """,
+            new { Y = period.Year, M = period.Month, C = period.Cutoff, By = byUserId }, tx);
+
+        foreach (var (person, slip) in slips)
+        {
+            // Only snapshot staff who actually have a computed payslip (a set salary).
+            if (slip.Computation is null) continue;
+
+            var json = JsonSerializer.Serialize(slip, SnapshotJson);
+            await con.ExecuteAsync(
+                """
+                insert into payslip_snapshots (period_id, user_id, full_name, net_pay, payslip)
+                values (@Pid, @Uid::uuid, @Name, @Net, @Json::jsonb)
+                """,
+                new { Pid = periodId, Uid = person.Id, Name = person.FullName, Net = slip.Computation.NetPay, Json = json }, tx);
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>Returns the frozen payslip for a staff member in a finalized period, or null.</summary>
+    public async Task<PayrollPayslip?> GetSnapshotAsync(PayrollPeriod period, Guid staffId)
+    {
+        using var con = _db.Open();
+        var json = await con.QuerySingleOrDefaultAsync<string?>(
+            """
+            select s.payslip::text
+            from payslip_snapshots s
+            join payroll_periods p on p.id = s.period_id
+            where p.year=@Y and p.month=@M and p.cutoff=@C and s.user_id=@Uid::uuid
+            """,
+            new { Y = period.Year, M = period.Month, C = period.Cutoff, Uid = staffId });
+        return json is null ? null : JsonSerializer.Deserialize<PayrollPayslip>(json, SnapshotJson);
+    }
+
+    /// <summary>Returns all frozen payslips for a finalized period (for the summary/exports).</summary>
+    public async Task<List<PayrollPayslip>> GetSnapshotsAsync(PayrollPeriod period)
+    {
+        using var con = _db.Open();
+        var rows = await con.QueryAsync<string>(
+            """
+            select s.payslip::text
+            from payslip_snapshots s
+            join payroll_periods p on p.id = s.period_id
+            where p.year=@Y and p.month=@M and p.cutoff=@C
+            order by s.full_name asc
+            """,
+            new { Y = period.Year, M = period.Month, C = period.Cutoff });
+        var list = new List<PayrollPayslip>();
+        foreach (var json in rows)
+        {
+            var slip = JsonSerializer.Deserialize<PayrollPayslip>(json, SnapshotJson);
+            if (slip is not null) list.Add(slip);
+        }
+        return list;
     }
 
     private static decimal Round(decimal value) =>
