@@ -64,6 +64,10 @@ public class Db
             alter table public.profiles
                 add column if not exists sched_time_out time not null default '17:00';
 
+            alter table public.timekeeping_requests
+                add column if not exists leave_duration text
+                    check (leave_duration is null or leave_duration in ('whole', 'half_am', 'half_pm'));
+
             do $$
             begin
               if not exists (select 1 from pg_type where typname = 'work_setup') then

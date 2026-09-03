@@ -50,6 +50,7 @@ public class TimekeepingRequest
     public TimeOnly? RequestedTimeOut { get; set; }
     public string? RequestType { get; set; }
     public string? Reason { get; set; }
+    public string? LeaveDuration { get; set; }   // leave only: 'whole' | 'half_am' | 'half_pm'
     public Guid? ApproverId { get; set; }
     public string? Status { get; set; }
     public string? ApproverNotes { get; set; }

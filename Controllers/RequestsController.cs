@@ -15,6 +15,12 @@ public class RequestsController : ControllerBase
     private static readonly HashSet<string> AllowedTypes =
         new(StringComparer.OrdinalIgnoreCase) { "adjustment", "leave", "overtime", "other" };
 
+    private static readonly HashSet<string> AllowedLeaveDurations =
+        new(StringComparer.OrdinalIgnoreCase) { "whole", "half_am", "half_pm" };
+
+    /// <summary>Minimum advance notice (days) required to file a leave.</summary>
+    private const int LeaveAdvanceDays = 3;
+
     private readonly Db _db;
     private readonly AuditService _audit;
 
@@ -53,11 +59,6 @@ public class RequestsController : ControllerBase
             return StatusCode(422, new { error = "work_date must be a date in YYYY-MM-DD format." });
         }
 
-        if (workDate > PhClock.Today)
-        {
-            return StatusCode(422, new { error = "work_date cannot be in the future." });
-        }
-
         if (!TimeOnly.TryParse(request.RequestedTimeIn, out var timeIn))
         {
             return StatusCode(422, new { error = "requested_time_in must be a time in HH:mm format." });
@@ -72,6 +73,30 @@ public class RequestsController : ControllerBase
         if (!AllowedTypes.Contains(type))
         {
             return StatusCode(422, new { error = $"request_type must be one of: {string.Join(", ", AllowedTypes)}." });
+        }
+
+        // Date rules are type-specific:
+        //   leave     → a FUTURE date filed at least 3 days in advance
+        //   others    → a past or current date (correcting what already happened)
+        var isLeave = string.Equals(type, "leave", StringComparison.OrdinalIgnoreCase);
+        string? leaveDuration = null;
+        if (isLeave)
+        {
+            var earliest = PhClock.Today.AddDays(LeaveAdvanceDays);
+            if (workDate < earliest)
+            {
+                return StatusCode(422, new { error = $"Leave must be filed at least {LeaveAdvanceDays} days in advance. The earliest date you can select is {earliest:yyyy-MM-dd}." });
+            }
+
+            leaveDuration = (request.LeaveDuration ?? "whole").Trim().ToLowerInvariant();
+            if (!AllowedLeaveDurations.Contains(leaveDuration))
+            {
+                return StatusCode(422, new { error = $"leaveDuration must be one of: {string.Join(", ", AllowedLeaveDurations)}." });
+            }
+        }
+        else if (workDate > PhClock.Today)
+        {
+            return StatusCode(422, new { error = "work_date cannot be in the future for this request type." });
         }
 
         var uid = CurrentUserId();
@@ -89,9 +114,9 @@ public class RequestsController : ControllerBase
         var row = await con.QuerySingleAsync<TimekeepingRequest>(
             """
             insert into timekeeping_requests
-                (user_id, work_date, requested_time_in, requested_time_out, request_type, reason, approver_id, status)
+                (user_id, work_date, requested_time_in, requested_time_out, request_type, reason, leave_duration, approver_id, status)
             values
-                (@Uid::uuid, @WorkDate, @In::time, @Out::time, @Type::request_type, @Reason, @ApproverId::uuid, 'pending')
+                (@Uid::uuid, @WorkDate, @In::time, @Out::time, @Type::request_type, @Reason, @LeaveDuration, @ApproverId::uuid, 'pending')
             returning *
             """,
             new
@@ -102,6 +127,7 @@ public class RequestsController : ControllerBase
                 Out = timeOut,
                 Type = type,
                 Reason = request.Reason.Trim(),
+                LeaveDuration = leaveDuration,
                 ApproverId = me.ApproverId
             }, tx);
 
