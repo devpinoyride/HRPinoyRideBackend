@@ -143,7 +143,7 @@ public class PayrollService
                    mobile_incentive_enabled, mobile_incentive_amount, work_days, fixed_salary,
                    sched_time_in, sched_time_out
             from profiles
-            where role <> 'hr_admin'
+            where role <> 'hr_admin' and status <> 'inactive'
             order by full_name asc
             """);
         return rows.AsList();

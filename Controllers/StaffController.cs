@@ -313,6 +313,36 @@ public class StaffController : ControllerBase
         return Ok(row);
     }
 
+    /// <summary>POST /api/staff/{id}/activate — set status = 'active'.</summary>
+    [HttpPost("{id:guid}/activate")]
+    public async Task<IActionResult> Activate(Guid id)
+    {
+        var uid = CurrentUserId();
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var row = await con.QuerySingleOrDefaultAsync<Profile>(
+            """
+            update profiles
+            set status = 'active'
+            where id = @Id::uuid
+            returning *
+            """,
+            new { Id = id }, tx);
+
+        if (row is null)
+        {
+            throw new ApiException(404, "Staff member not found.");
+        }
+
+        await _audit.AddAsync(con, tx, uid, "activate_staff", "profiles", row.Id.ToString(),
+            new { user_id = row.Id });
+
+        tx.Commit();
+        return Ok(row);
+    }
+
     /// <summary>
     /// POST /api/staff/{id}/reset-password — HR admin sets a new temporary
     /// password for a staff member (e.g. when they forgot theirs). Returns the
