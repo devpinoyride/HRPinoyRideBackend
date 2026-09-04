@@ -452,10 +452,16 @@ public class PayrollService
             var officeRate = staff.OfficeIncentiveEnabled ? staff.OfficeIncentiveAmount : 0m;
             var officeAllowance = Round(officeRate * officeAllowanceDays);
 
-            // Mobile incentive: per-staff rate × weeks (Mon–Sun) in which the staff
-            // actually had a workday (present or paid leave). A week with no
-            // attendance pays nothing. Disabled → ₱0 (still shown for transparency).
-            var weeksWithWorkdays = activeWeekMondays.Count;
+            // Mobile incentive: per-staff rate × weeks (Mon–Sun).
+            //   Fixed-salary staff → every week in the cutoff (attendance-independent,
+            //     consistent with their fixed pay).
+            //   Everyone else → only weeks in which they actually had a workday
+            //     (present or paid leave). A week with no attendance pays nothing.
+            // Disabled → ₱0 (still shown for transparency).
+            var isFixed = staff.FixedSalary && salaryMode == "basic";
+            var weeksWithWorkdays = isFixed
+                ? CountWeeksInPeriod(period.Start, period.End, workDayPattern)
+                : activeWeekMondays.Count;
             var mobileRate = staff.MobileIncentiveEnabled ? staff.MobileIncentiveAmount : 0m;
             var mobileAllowance = Round(mobileRate * weeksWithWorkdays);
 
@@ -634,4 +640,19 @@ public class PayrollService
     /// <summary>Monday that starts the Monday–Sunday week containing <paramref name="d"/>.</summary>
     private static DateOnly WeekMonday(DateOnly d) =>
         d.AddDays(-(int)d.DayOfWeek + (d.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
+
+    /// <summary>
+    /// Count of distinct Mon–Sun weeks in the period that contain at least one
+    /// workday (per the work-week pattern). Used for the fixed-salary mobile
+    /// incentive, which is attendance-independent.
+    /// </summary>
+    private static int CountWeeksInPeriod(DateOnly start, DateOnly end, string workDays)
+    {
+        var mondays = new HashSet<DateOnly>();
+        foreach (var d in Workdays(start, end, workDays))
+        {
+            mondays.Add(WeekMonday(d));
+        }
+        return mondays.Count;
+    }
 }
