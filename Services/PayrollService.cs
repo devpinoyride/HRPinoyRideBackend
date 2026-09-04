@@ -453,15 +453,16 @@ public class PayrollService
             var officeAllowance = Round(officeRate * officeAllowanceDays);
 
             // Mobile incentive: per-staff rate × weeks (Mon–Sun).
-            //   Fixed-salary staff → every week in the cutoff (attendance-independent,
-            //     consistent with their fixed pay).
-            //   Everyone else → only weeks in which they actually had a workday
-            //     (present or paid leave). A week with no attendance pays nothing.
-            // Disabled → ₱0 (still shown for transparency).
+            //   A week belongs to the cutoff that contains its MONDAY, so a week
+            //   straddling the 15th/16th boundary is paid in exactly one cutoff
+            //   (never double-counted across the month).
+            //   Fixed-salary staff → every such week in the cutoff (attendance-
+            //     independent). Everyone else → only weeks they actually worked
+            //     (present or paid leave). Disabled → ₱0 (shown for transparency).
             var isFixed = staff.FixedSalary && salaryMode == "basic";
             var weeksWithWorkdays = isFixed
-                ? CountWeeksInPeriod(period.Start, period.End, workDayPattern)
-                : activeWeekMondays.Count;
+                ? CountWeeksInPeriod(period, workDayPattern)
+                : activeWeekMondays.Count(m => m >= period.Start && m <= period.End);
             var mobileRate = staff.MobileIncentiveEnabled ? staff.MobileIncentiveAmount : 0m;
             var mobileAllowance = Round(mobileRate * weeksWithWorkdays);
 
@@ -642,16 +643,21 @@ public class PayrollService
         d.AddDays(-(int)d.DayOfWeek + (d.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
 
     /// <summary>
-    /// Count of distinct Mon–Sun weeks in the period that contain at least one
-    /// workday (per the work-week pattern). Used for the fixed-salary mobile
-    /// incentive, which is attendance-independent.
+    /// Count of distinct Mon–Sun weeks whose MONDAY falls within the cutoff and
+    /// that contain at least one workday (per the work-week pattern). Counting by
+    /// the week's Monday ensures a boundary week belongs to exactly one cutoff.
+    /// Used for the fixed-salary mobile incentive (attendance-independent).
     /// </summary>
-    private static int CountWeeksInPeriod(DateOnly start, DateOnly end, string workDays)
+    private static int CountWeeksInPeriod(PayrollPeriod period, string workDays)
     {
         var mondays = new HashSet<DateOnly>();
-        foreach (var d in Workdays(start, end, workDays))
+        foreach (var d in Workdays(period.Start, period.End, workDays))
         {
-            mondays.Add(WeekMonday(d));
+            var monday = WeekMonday(d);
+            if (monday >= period.Start && monday <= period.End)
+            {
+                mondays.Add(monday);
+            }
         }
         return mondays.Count;
     }
