@@ -189,6 +189,24 @@ select
 from md;
 
 -- ---------------------------------------------------------------------------
+-- 4b) reimbursements / additional incentives (approver: Maria Santos)
+-- ---------------------------------------------------------------------------
+insert into public.reimbursements (user_id, note, amount, approver_id, status) values
+  ('44444444-4444-4444-8444-444444444444', 'Gas reimbursement — dispatch week',     500, '22222222-2222-4222-8222-222222222222', 'pending'),
+  ('33333333-3333-4333-8333-333333333333', 'Mobile load incentive',                 300, '22222222-2222-4222-8222-222222222222', 'pending');
+
+-- Approved today → lands on the current payoff period's payslip.
+insert into public.reimbursements (user_id, note, amount, approver_id, status, approver_notes, resolved_at)
+select
+  '33333333-3333-4333-8333-333333333333'::uuid,
+  'Fare reimbursement — relief shift',
+  250,
+  '22222222-2222-4222-8222-222222222222'::uuid,
+  'approved',
+  'Approved — keep receipts on file.',
+  now();
+
+-- ---------------------------------------------------------------------------
 -- 5) audit_log (server-side history — the API writes these at runtime too)
 -- ---------------------------------------------------------------------------
 insert into public.audit_log (actor_id, action, table_name, record_id, details)

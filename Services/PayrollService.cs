@@ -211,6 +211,26 @@ public class PayrollService
             new { Uid = staff.Id, From = period.Start, To = period.End })).AsList();
         var overtimeSet = approvedOvertime.ToHashSet();
 
+        // Approved reimbursements / additional incentives approved within the
+        // cutoff (resolved_at in PH time). They land on the payslip of the
+        // period containing the approval timestamp, in every salary mode.
+        var approvedReimbursements = (await con.QueryAsync<Reimbursement>(
+            """
+            select id, user_id, note, amount
+            from reimbursements
+            where user_id = @Uid::uuid and status = 'approved'
+              and (resolved_at at time zone 'Asia/Manila')::date between @From and @To
+            order by resolved_at asc
+            """,
+            new { Uid = staff.Id, From = period.Start, To = period.End })).AsList();
+        var reimbursementTotal = 0m;
+        foreach (var r in approvedReimbursements) reimbursementTotal += r.Amount;
+        var reimbursementLines = approvedReimbursements.Select(r => new PayrollReimbursementLine
+        {
+            Note = r.Note,
+            Amount = r.Amount
+        }).ToList();
+
         var entryDates = entries.Select(e => e.WorkDate).ToHashSet();
 
         var days = new List<PayrollDayDetail>();
@@ -489,7 +509,7 @@ public class PayrollService
 
             // Pay before the tardiness deduction. Cap the deduction so net pay
             // never goes negative from tardiness/undertime.
-            var payBeforeTardiness = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay;
+            var payBeforeTardiness = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay + reimbursementTotal;
             if (tardinessDeduction > payBeforeTardiness && payBeforeTardiness > 0)
             {
                 tardinessDeduction = payBeforeTardiness;
@@ -523,6 +543,8 @@ public class PayrollService
                 MobileAllowance = mobileAllowance,
                 SundayDays = sundayDays,
                 SundayPay = sundayPay,
+                ReimbursementTotal = reimbursementTotal,
+                Reimbursements = reimbursementLines,
                 LateMinutes = totalLateMinutes,
                 EarlyOutMinutes = totalEarlyOutMinutes,
                 TardinessDeduction = tardinessDeduction,

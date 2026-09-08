@@ -54,6 +54,11 @@ default (`http://localhost:5000`). Swagger is available at
 | GET | `/api/approvals` | `ApproverOrAbove` |
 | POST | `/api/approvals/{id}/approve` | `ApproverOrAbove` |
 | POST | `/api/approvals/{id}/reject` | `ApproverOrAbove` |
+| POST | `/api/reimbursements` | authenticated (self) |
+| GET | `/api/reimbursements/mine` | authenticated (self) |
+| GET | `/api/reimbursements/pending` | `ApproverOrAbove` |
+| POST | `/api/reimbursements/{id}/approve` | `ApproverOrAbove` |
+| POST | `/api/reimbursements/{id}/reject` | `ApproverOrAbove` |
 | GET | `/api/staff` | `HrAdmin` |
 | POST | `/api/staff` | `HrAdmin` |
 | PUT | `/api/staff/{id}` | `HrAdmin` |

@@ -99,6 +99,24 @@ public class Db
                 constraint payslip_snapshots_key unique (period_id, user_id)
             );
 
+            -- Reimbursements / additional incentives: staff file a request with a
+            -- note + amount; the amount is added to their payslip once approved.
+            create table if not exists public.reimbursements (
+                id bigserial primary key,
+                user_id uuid not null references public.profiles (id) on delete cascade,
+                note text not null,
+                amount numeric(12, 2) not null check (amount > 0),
+                approver_id uuid references public.profiles (id),
+                status public.request_status not null default 'pending',
+                approver_notes text,
+                resolved_at timestamptz,
+                created_at timestamptz not null default now()
+            );
+
+            create index if not exists reimbursements_approver_status_idx on public.reimbursements (approver_id, status);
+            create index if not exists reimbursements_user_idx on public.reimbursements (user_id);
+            create index if not exists reimbursements_resolved_idx on public.reimbursements (resolved_at);
+
             do $$
             begin
               if not exists (select 1 from pg_type where typname = 'work_setup') then

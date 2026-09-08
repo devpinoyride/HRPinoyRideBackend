@@ -143,6 +143,27 @@ create index if not exists timekeeping_requests_approver_status_idx on public.ti
 create index if not exists timekeeping_requests_user_idx            on public.timekeeping_requests (user_id);
 create index if not exists timekeeping_requests_work_date_idx       on public.timekeeping_requests (work_date);
 
+-- ---- reimbursements / additional incentives -------------------------------
+-- Staff members request an extra payment (e.g. gas, fare, mobile load, medical)
+-- that is added to their payslip once an approver approves it. An approved
+-- reimbursement lands on the payslip of the cutoff whose dates contain the
+-- approval timestamp (resolved_at), so approvers control which payslip it hits.
+create table if not exists public.reimbursements (
+  id              bigserial primary key,
+  user_id         uuid not null references public.profiles (id) on delete cascade,
+  note            text not null,
+  amount          numeric(12,2) not null check (amount > 0),
+  approver_id     uuid references public.profiles (id),
+  status          public.request_status not null default 'pending',
+  approver_notes  text,
+  resolved_at     timestamptz,
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists reimbursements_approver_status_idx on public.reimbursements (approver_id, status);
+create index if not exists reimbursements_user_idx            on public.reimbursements (user_id);
+create index if not exists reimbursements_resolved_idx        on public.reimbursements (resolved_at);
+
 -- ---- audit_log -------------------------------------------------------------
 create table if not exists public.audit_log (
   id         bigserial primary key,

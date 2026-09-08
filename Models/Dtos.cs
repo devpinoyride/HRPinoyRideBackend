@@ -47,6 +47,14 @@ public class ResolveRequestRequest
     public string? Notes { get; set; }
 }
 
+// A reimbursement / additional incentive request. The amount is added to the
+// staff member's payslip once an approver approves the request.
+public class CreateReimbursementRequest
+{
+    public string? Note { get; set; }
+    public decimal? Amount { get; set; }
+}
+
 public class CreateStaffRequest
 {
     public string? Email { get; set; }

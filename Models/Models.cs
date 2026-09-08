@@ -61,6 +61,21 @@ public class TimekeepingRequest
     public string? Email { get; set; }
 }
 
+public class Reimbursement
+{
+    public long Id { get; set; }
+    public Guid UserId { get; set; }
+    public string? Note { get; set; }
+    public decimal Amount { get; set; }
+    public Guid? ApproverId { get; set; }
+    public string? Status { get; set; }
+    public string? ApproverNotes { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public DateTime? CreatedAt { get; set; }
+    public string? FullName { get; set; }
+    public string? Email { get; set; }
+}
+
 public class AuditLog
 {
     public long Id { get; set; }
@@ -99,6 +114,13 @@ public class PayrollDayDetail
     public int EarlyOutMinutes { get; set; }
 }
 
+// One approved reimbursement / additional incentive shown on a payslip.
+public class PayrollReimbursementLine
+{
+    public string? Note { get; set; }
+    public decimal Amount { get; set; }
+}
+
 public class PayrollComputation
 {
     public string? SalaryMode { get; set; }        // 'basic' or 'daily'
@@ -127,6 +149,9 @@ public class PayrollComputation
     // Sunday work (by request): flat +1 daily rate per approved Sunday worked.
     public int SundayDays { get; set; }
     public decimal SundayPay { get; set; }
+    // Approved reimbursements / additional incentives in the period.
+    public decimal ReimbursementTotal { get; set; }
+    public List<PayrollReimbursementLine> Reimbursements { get; set; } = new();
     // Tardiness / undertime (late-in beyond 15-min grace + early-out), pro-rata.
     public int LateMinutes { get; set; }
     public int EarlyOutMinutes { get; set; }
@@ -165,5 +190,6 @@ public class PayrollSummaryRow
     public decimal? OvertimePay { get; set; }
     public decimal? OfficeAllowance { get; set; }
     public decimal? MobileAllowance { get; set; }
+    public decimal? ReimbursementTotal { get; set; }
     public decimal? NetPay { get; set; }
 }
