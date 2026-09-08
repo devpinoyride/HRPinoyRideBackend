@@ -18,7 +18,7 @@ public class Profile
     public decimal OfficeIncentiveAmount { get; set; } = 100m;  // per office workday present
     public bool MobileIncentiveEnabled { get; set; } = true;
     public decimal MobileIncentiveAmount { get; set; } = 100m;  // per week with ≥1 workday
-    public string WorkDays { get; set; } = "mon_fri";           // 'mon_fri' or 'mon_sat'
+    public string WorkDays { get; set; } = "mon_fri";           // 'mon_fri', 'mon_sat', or 'mon_sun'
     public bool FixedSalary { get; set; }                       // basic mode: always full pay, no deduction
     public TimeOnly SchedTimeIn { get; set; } = new(9, 0);      // expected daily time-in
     public TimeOnly SchedTimeOut { get; set; } = new(17, 0);    // expected daily time-out

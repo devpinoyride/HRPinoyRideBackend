@@ -56,7 +56,14 @@ public class Db
                 add column if not exists mobile_incentive_amount numeric(12, 2) not null default 100;
             alter table public.profiles
                 add column if not exists work_days text not null default 'mon_fri'
-                    check (work_days in ('mon_fri', 'mon_sat'));
+                    check (work_days in ('mon_fri', 'mon_sat', 'mon_sun'));
+
+            -- Existing databases keep the old two-value CHECK (add column if not
+            -- exists doesn't widen it), so replace the constraint by its
+            -- auto-generated name to allow Mon–Sun schedules.
+            alter table public.profiles drop constraint if exists profiles_work_days_check;
+            alter table public.profiles add constraint profiles_work_days_check
+                check (work_days in ('mon_fri', 'mon_sat', 'mon_sun'));
             alter table public.profiles
                 add column if not exists fixed_salary boolean not null default false;
             alter table public.profiles

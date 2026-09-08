@@ -63,7 +63,7 @@ public class CreateStaffRequest
     public decimal? OfficeIncentiveAmount { get; set; }
     public bool? MobileIncentiveEnabled { get; set; }
     public decimal? MobileIncentiveAmount { get; set; }
-    public string? WorkDays { get; set; }              // 'mon_fri' or 'mon_sat'
+    public string? WorkDays { get; set; }              // 'mon_fri', 'mon_sat', or 'mon_sun'
     public bool? FixedSalary { get; set; }
     public string? SchedTimeIn { get; set; }           // "HH:mm"
     public string? SchedTimeOut { get; set; }          // "HH:mm"
@@ -82,7 +82,7 @@ public class UpdateStaffRequest
     public decimal? OfficeIncentiveAmount { get; set; }
     public bool? MobileIncentiveEnabled { get; set; }
     public decimal? MobileIncentiveAmount { get; set; }
-    public string? WorkDays { get; set; }              // 'mon_fri' or 'mon_sat'
+    public string? WorkDays { get; set; }              // 'mon_fri', 'mon_sat', or 'mon_sun'
     public bool? FixedSalary { get; set; }
     public string? SchedTimeIn { get; set; }           // "HH:mm"
     public string? SchedTimeOut { get; set; }          // "HH:mm"

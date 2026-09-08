@@ -18,7 +18,7 @@ public class StaffController : ControllerBase
         new(StringComparer.OrdinalIgnoreCase) { "employee", "approver", "hr_admin" };
 
     private static readonly HashSet<string> AllowedWorkDays =
-        new(StringComparer.OrdinalIgnoreCase) { "mon_fri", "mon_sat" };
+        new(StringComparer.OrdinalIgnoreCase) { "mon_fri", "mon_sat", "mon_sun" };
 
     /// <summary>Parses "HH:mm" (or "HH:mm:ss") to TimeOnly; null/blank → null.</summary>
     private static TimeOnly? ParseSchedTime(string? value)

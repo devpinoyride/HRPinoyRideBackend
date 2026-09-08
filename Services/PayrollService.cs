@@ -42,7 +42,7 @@ namespace PinoyRideHrApi.Services;
 /// (toggle + editable peso amount); disabled incentives contribute ₱0 but are
 /// still shown on the payslip for transparency.
 ///
-/// Workdays follow each staff's work-week pattern (Mon–Fri or Mon–Sat).
+/// Workdays follow each staff's work-week pattern (Mon–Fri, Mon–Sat, or Mon–Sun).
 /// A workday is absent when the staff has neither
 /// a time_entries row nor an approved leave request covering it (approving a
 /// leave writes an 'adjusted' entry, so approved leave is never deducted).
@@ -57,6 +57,9 @@ public class PayrollService
 
     /// <summary>Divisor for the daily rate, Mon–Sat schedule (payroll days per month).</summary>
     public const int PayrollDaysPerMonthMonSat = 26;
+
+    /// <summary>Divisor for the daily rate, Mon–Sun schedule (payroll days per month).</summary>
+    public const int PayrollDaysPerMonthMonSun = 30;
 
     /// <summary>Standard paid hours in a workday (PH 8-hour day).</summary>
     public const decimal StandardDailyHours = 8m;
@@ -117,15 +120,17 @@ public class PayrollService
 
     /// <summary>
     /// Workday dates between the two dates, inclusive, according to the work-week
-    /// pattern: "mon_sat" counts Monday–Saturday, anything else Monday–Friday.
+    /// pattern: "mon_fri" = Mon–Fri, "mon_sat" = Mon–Sat, "mon_sun" = Mon–Sun.
     /// </summary>
     public static List<DateOnly> Workdays(DateOnly start, DateOnly end, string workDays = "mon_fri")
     {
-        var includeSaturday = string.Equals(workDays, "mon_sat", StringComparison.OrdinalIgnoreCase);
+        var includeSunday = string.Equals(workDays, "mon_sun", StringComparison.OrdinalIgnoreCase);
+        var includeSaturday = includeSunday
+            || string.Equals(workDays, "mon_sat", StringComparison.OrdinalIgnoreCase);
         var days = new List<DateOnly>();
         for (var d = start; d <= end; d = d.AddDays(1))
         {
-            if (d.DayOfWeek == DayOfWeek.Sunday) continue;
+            if (d.DayOfWeek == DayOfWeek.Sunday && !includeSunday) continue;
             if (d.DayOfWeek == DayOfWeek.Saturday && !includeSaturday) continue;
             days.Add(d);
         }
@@ -344,7 +349,8 @@ public class PayrollService
 
         // ---- Sunday work (by request) --------------------------------------
         // Rest days = every calendar day in the period that is NOT part of the
-        // staff's work-week pattern (Mon–Fri → Sat+Sun rest; Mon–Sat → Sun rest).
+        // staff's work-week pattern (Mon–Fri → Sat+Sun rest; Mon–Sat → Sun rest;
+        // Mon–Sun → no rest days).
         // Every rest day is shown in the attendance detail tagged "rest_day" so
         // it is tracked. A rest day is PAID a flat +1 daily rate only when the
         // staff both has a time entry AND an approved request for it (worked by
@@ -412,12 +418,15 @@ public class PayrollService
             {
                 // BASIC mode: monthly salary, paid semi-monthly. Daily rate is derived
                 // as basic ÷ (payroll days per month); absence deduction applies per
-                // absent workday. Mon–Sat schedules have more payroll days, so the
-                // divisor grows accordingly (keeps the per-day deduction fair).
+                // absent workday. Mon–Sat and Mon–Sun schedules have more payroll
+                // days, so the divisor grows accordingly (keeps the per-day
+                // deduction fair).
                 var basic = staff.BasicSalary!.Value;
-                var daysPerMonth = string.Equals(workDayPattern, "mon_sat", StringComparison.OrdinalIgnoreCase)
-                    ? PayrollDaysPerMonthMonSat
-                    : PayrollDaysPerMonth;
+                var daysPerMonth = string.Equals(workDayPattern, "mon_sun", StringComparison.OrdinalIgnoreCase)
+                    ? PayrollDaysPerMonthMonSun
+                    : string.Equals(workDayPattern, "mon_sat", StringComparison.OrdinalIgnoreCase)
+                        ? PayrollDaysPerMonthMonSat
+                        : PayrollDaysPerMonth;
                 dailyRate = Round(basic / daysPerMonth);
 
                 if (staff.FixedSalary)

@@ -70,8 +70,15 @@ alter table public.profiles add column if not exists mobile_incentive_amount  nu
 -- Work-week pattern per staff: which weekdays count as workdays for payroll.
 --   mon_fri → Monday–Friday (default)
 --   mon_sat → Monday–Saturday
+--   mon_sun → Monday–Sunday
 alter table public.profiles add column if not exists work_days text not null default 'mon_fri'
-  check (work_days in ('mon_fri', 'mon_sat'));
+  check (work_days in ('mon_fri', 'mon_sat', 'mon_sun'));
+
+-- Existing databases created before Mon–Sun support keep the old two-value CHECK,
+-- so drop and re-add it by its auto-generated name to widen the allowed set.
+alter table public.profiles drop constraint if exists profiles_work_days_check;
+alter table public.profiles add constraint profiles_work_days_check
+  check (work_days in ('mon_fri', 'mon_sat', 'mon_sun'));
 
 -- Fixed salary: when true, a monthly (basic) staff always receives their full
 -- semi-monthly basic with NO absence deduction, regardless of attendance.
