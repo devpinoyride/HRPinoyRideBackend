@@ -164,6 +164,27 @@ create index if not exists reimbursements_approver_status_idx on public.reimburs
 create index if not exists reimbursements_user_idx            on public.reimbursements (user_id);
 create index if not exists reimbursements_resolved_idx        on public.reimbursements (resolved_at);
 
+-- ---- deductions / cash advances --------------------------------------------
+-- Staff request an amount (e.g. cash advance, loan, other) that is SUBTRACTED
+-- from their payslip once an approver approves it. Mirrors the reimbursements
+-- flow: an approved deduction lands on the payslip of the cutoff whose dates
+-- contain the approval timestamp (resolved_at).
+create table if not exists public.deductions (
+  id              bigserial primary key,
+  user_id         uuid not null references public.profiles (id) on delete cascade,
+  note            text not null,
+  amount          numeric(12, 2) not null check (amount > 0),
+  approver_id     uuid references public.profiles (id),
+  status          public.request_status not null default 'pending',
+  approver_notes  text,
+  resolved_at     timestamptz,
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists deductions_approver_status_idx on public.deductions (approver_id, status);
+create index if not exists deductions_user_idx            on public.deductions (user_id);
+create index if not exists deductions_resolved_idx        on public.deductions (resolved_at);
+
 -- ---- audit_log -------------------------------------------------------------
 create table if not exists public.audit_log (
   id         bigserial primary key,

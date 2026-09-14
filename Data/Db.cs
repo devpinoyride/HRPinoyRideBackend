@@ -117,6 +117,24 @@ public class Db
             create index if not exists reimbursements_user_idx on public.reimbursements (user_id);
             create index if not exists reimbursements_resolved_idx on public.reimbursements (resolved_at);
 
+            -- Deductions / cash advances: staff file a request with a note +
+            -- amount; the amount is SUBTRACTED from their payslip once approved.
+            create table if not exists public.deductions (
+                id bigserial primary key,
+                user_id uuid not null references public.profiles (id) on delete cascade,
+                note text not null,
+                amount numeric(12, 2) not null check (amount > 0),
+                approver_id uuid references public.profiles (id),
+                status public.request_status not null default 'pending',
+                approver_notes text,
+                resolved_at timestamptz,
+                created_at timestamptz not null default now()
+            );
+
+            create index if not exists deductions_approver_status_idx on public.deductions (approver_id, status);
+            create index if not exists deductions_user_idx on public.deductions (user_id);
+            create index if not exists deductions_resolved_idx on public.deductions (resolved_at);
+
             do $$
             begin
               if not exists (select 1 from pg_type where typname = 'work_setup') then

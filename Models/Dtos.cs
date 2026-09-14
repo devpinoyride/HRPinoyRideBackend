@@ -55,6 +55,14 @@ public class CreateReimbursementRequest
     public decimal? Amount { get; set; }
 }
 
+// A deduction / cash advance request. The amount is SUBTRACTED from the staff
+// member's payslip once an approver approves the request.
+public class CreateDeductionRequest
+{
+    public string? Note { get; set; }
+    public decimal? Amount { get; set; }
+}
+
 public class CreateStaffRequest
 {
     public string? Email { get; set; }

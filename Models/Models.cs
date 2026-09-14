@@ -76,6 +76,21 @@ public class Reimbursement
     public string? Email { get; set; }
 }
 
+public class Deduction
+{
+    public long Id { get; set; }
+    public Guid UserId { get; set; }
+    public string? Note { get; set; }
+    public decimal Amount { get; set; }
+    public Guid? ApproverId { get; set; }
+    public string? Status { get; set; }
+    public string? ApproverNotes { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public DateTime? CreatedAt { get; set; }
+    public string? FullName { get; set; }
+    public string? Email { get; set; }
+}
+
 public class AuditLog
 {
     public long Id { get; set; }
@@ -121,6 +136,13 @@ public class PayrollReimbursementLine
     public decimal Amount { get; set; }
 }
 
+// One approved deduction / cash advance shown on a payslip.
+public class PayrollDeductionLine
+{
+    public string? Note { get; set; }
+    public decimal Amount { get; set; }
+}
+
 public class PayrollComputation
 {
     public string? SalaryMode { get; set; }        // 'basic' or 'daily'
@@ -152,6 +174,9 @@ public class PayrollComputation
     // Approved reimbursements / additional incentives in the period.
     public decimal ReimbursementTotal { get; set; }
     public List<PayrollReimbursementLine> Reimbursements { get; set; } = new();
+    // Approved deductions / cash advances in the period (subtracted from net pay).
+    public decimal DeductionTotal { get; set; }
+    public List<PayrollDeductionLine> Deductions { get; set; } = new();
     // Tardiness / undertime (late-in beyond 15-min grace + early-out), pro-rata.
     public int LateMinutes { get; set; }
     public int EarlyOutMinutes { get; set; }
@@ -191,5 +216,6 @@ public class PayrollSummaryRow
     public decimal? OfficeAllowance { get; set; }
     public decimal? MobileAllowance { get; set; }
     public decimal? ReimbursementTotal { get; set; }
+    public decimal? DeductionTotal { get; set; }
     public decimal? NetPay { get; set; }
 }

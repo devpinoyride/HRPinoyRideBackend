@@ -82,6 +82,7 @@ public class PayrollController : ControllerBase
                     OfficeAllowance = c?.OfficeAllowance,
                     MobileAllowance = c?.MobileAllowance,
                     ReimbursementTotal = c?.ReimbursementTotal,
+                    DeductionTotal = c?.DeductionTotal,
                     NetPay = c?.NetPay
                 });
             }
@@ -115,6 +116,7 @@ public class PayrollController : ControllerBase
                 OfficeAllowance = slip.Computation?.OfficeAllowance,
                 MobileAllowance = slip.Computation?.MobileAllowance,
                 ReimbursementTotal = slip.Computation?.ReimbursementTotal,
+                DeductionTotal = slip.Computation?.DeductionTotal,
                 NetPay = slip.Computation?.NetPay
             });
         }
@@ -161,7 +163,7 @@ public class PayrollController : ControllerBase
           .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
           .AppendLine();
         sb.AppendLine();
-        sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,Reimbursements,SundayDays,SundayPay,NetPay");
+        sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,Reimbursements,CashAdvances,SundayDays,SundayPay,NetPay");
 
         // Unified list of payslips to export: snapshots (finalized) or live compute.
         var exportSlips = new List<PayrollPayslip>();
@@ -204,15 +206,16 @@ public class PayrollController : ControllerBase
               .Append(Csv(c is null ? "" : c.OfficeAllowance.ToString("0.00"))).Append(',')
               .Append(Csv(c is null ? "" : c.MobileAllowance.ToString("0.00"))).Append(',')
               .Append(Csv(c is null ? "" : c.ReimbursementTotal.ToString("0.00"))).Append(',')
+              .Append(Csv(c is null ? "" : c.DeductionTotal.ToString("0.00"))).Append(',')
               .Append(Csv((c?.SundayDays ?? 0).ToString())).Append(',')
               .Append(Csv(c is null ? "" : c.SundayPay.ToString("0.00"))).Append(',')
               .Append(Csv(c is null ? "" : c.NetPay.ToString("0.00")))
               .AppendLine();
         }
 
-        // Trailing total row for quick reconciliation.
+        // Trailing total row for quick reconciliation (24 columns → 23 commas).
         sb.AppendLine();
-        sb.Append("TOTAL NET PAY,,,,,,,,,,,,,,,,,,,,,,,,").Append(totalNet.ToString("0.00")).AppendLine();
+        sb.Append("TOTAL NET PAY").Append(',', 23).Append(totalNet.ToString("0.00")).AppendLine();
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
         var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.csv";

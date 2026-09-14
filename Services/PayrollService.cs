@@ -25,6 +25,7 @@ namespace PinoyRideHrApi.Services;
 ///   sunday pay         = daily rate × approved Sundays worked (by request)
 ///   net pay            = semi-monthly basic − absence deduction + overtime pay
 ///                         + office incentive + mobile incentive + sunday pay
+///                         + reimbursements − deductions
 ///
 /// DAILY mode (salary_mode = 'daily', for staff paid per day worked, e.g. ₱850/day):
 ///   daily rate         = daily_rate field directly
@@ -37,6 +38,7 @@ namespace PinoyRideHrApi.Services;
 ///   sunday pay         = daily rate × approved Sundays worked (by request)
 ///   net pay            = semi-monthly basic + overtime pay
 ///                         + office incentive + mobile incentive + sunday pay
+///                         + reimbursements − deductions
 ///
 /// Office and mobile incentives are configured per staff on the Staff page
 /// (toggle + editable peso amount); disabled incentives contribute ₱0 but are
@@ -231,6 +233,25 @@ public class PayrollService
         {
             Note = r.Note,
             Amount = r.Amount
+        }).ToList();
+
+        // Approved deductions / cash advances approved within the cutoff. They
+        // are SUBTRACTED from the payslip, in every salary mode.
+        var approvedDeductions = (await con.QueryAsync<Deduction>(
+            """
+            select id, user_id, note, amount
+            from deductions
+            where user_id = @Uid::uuid and status = 'approved'
+              and (resolved_at at time zone 'Asia/Manila')::date between @From and @To
+            order by resolved_at asc
+            """,
+            new { Uid = staff.Id, From = period.Start, To = period.End })).AsList();
+        var deductionTotal = 0m;
+        foreach (var d in approvedDeductions) deductionTotal += d.Amount;
+        var deductionLines = approvedDeductions.Select(d => new PayrollDeductionLine
+        {
+            Note = d.Note,
+            Amount = d.Amount
         }).ToList();
 
         var entryDates = entries.Select(e => e.WorkDate).ToHashSet();
@@ -515,7 +536,7 @@ public class PayrollService
 
             // Pay before the tardiness deduction. Cap the deduction so net pay
             // never goes negative from tardiness/undertime.
-            var payBeforeTardiness = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay + reimbursementTotal;
+            var payBeforeTardiness = semiMonthly - deduction + overtimePay + officeAllowance + mobileAllowance + sundayPay + reimbursementTotal - deductionTotal;
             if (tardinessDeduction > payBeforeTardiness && payBeforeTardiness > 0)
             {
                 tardinessDeduction = payBeforeTardiness;
@@ -551,6 +572,8 @@ public class PayrollService
                 SundayPay = sundayPay,
                 ReimbursementTotal = reimbursementTotal,
                 Reimbursements = reimbursementLines,
+                DeductionTotal = deductionTotal,
+                Deductions = deductionLines,
                 LateMinutes = totalLateMinutes,
                 EarlyOutMinutes = totalEarlyOutMinutes,
                 TardinessDeduction = tardinessDeduction,
