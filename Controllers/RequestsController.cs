@@ -76,9 +76,12 @@ public class RequestsController : ControllerBase
         }
 
         // Date rules are type-specific:
-        //   leave     → a FUTURE date filed at least 3 days in advance
-        //   others    → a past or current date (correcting what already happened)
+        //   leave      → a FUTURE date filed at least 3 days in advance
+        //   adjustment → any date, including a FUTURE one (pre-schedule the
+        //                time in/out for an upcoming shift)
+        //   overtime/other → a past or current date (what already happened)
         var isLeave = string.Equals(type, "leave", StringComparison.OrdinalIgnoreCase);
+        var isAdjustment = string.Equals(type, "adjustment", StringComparison.OrdinalIgnoreCase);
         string? leaveDuration = null;
         if (isLeave)
         {
@@ -94,7 +97,7 @@ public class RequestsController : ControllerBase
                 return StatusCode(422, new { error = $"leaveDuration must be one of: {string.Join(", ", AllowedLeaveDurations)}." });
             }
         }
-        else if (workDate > PhClock.Today)
+        else if (!isAdjustment && workDate > PhClock.Today)
         {
             return StatusCode(422, new { error = "work_date cannot be in the future for this request type." });
         }
