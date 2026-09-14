@@ -61,7 +61,7 @@ alter table public.profiles add column if not exists daily_rate numeric(12,2);
 -- ₱100 office/mobile allowance constants. Each incentive has an on/off toggle and
 -- an editable peso amount. Idempotent so existing databases gain them on re-run.
 --   office_incentive → paid per office workday the staff was present
---   mobile_incentive → paid per week (Mon–Sun) with ≥1 workday in the cutoff
+--   mobile_incentive → paid per Sunday in the cutoff (e.g. Sep 1–15 → 2 weeks)
 alter table public.profiles add column if not exists office_incentive_enabled boolean not null default true;
 alter table public.profiles add column if not exists office_incentive_amount  numeric(12,2) not null default 100;
 alter table public.profiles add column if not exists mobile_incentive_enabled boolean not null default true;

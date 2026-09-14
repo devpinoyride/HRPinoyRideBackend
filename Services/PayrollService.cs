@@ -20,8 +20,8 @@ namespace PinoyRideHrApi.Services;
 ///                        clock in for zero days are not deducted)
 ///   overtime pay       = OT hours × (daily rate ÷ 8) × 1.25
 ///   office incentive   = per-staff rate × present office workdays (₱0 if disabled)
-///   mobile incentive   = per-staff rate × weeks the staff actually worked
-///                        (present or paid leave; ₱0 if disabled)
+///   mobile incentive   = per-staff rate × Sundays in the cutoff
+///                        (e.g. Sep 1–15 → 2 weeks; ₱0 if disabled)
 ///   sunday pay         = daily rate × approved Sundays worked (by request)
 ///   net pay            = semi-monthly basic − absence deduction + overtime pay
 ///                         + office incentive + mobile incentive + sunday pay
@@ -32,8 +32,8 @@ namespace PinoyRideHrApi.Services;
 ///   absence deduction  = none (daily-paid staff are not deducted for absences)
 ///   overtime pay       = OT hours × (daily rate ÷ 8) × 1.25
 ///   office incentive   = per-staff rate × present office workdays (₱0 if disabled)
-///   mobile incentive   = per-staff rate × weeks the staff actually worked
-///                        (present or paid leave; ₱0 if disabled)
+///   mobile incentive   = per-staff rate × Sundays in the cutoff
+///                        (e.g. Sep 1–15 → 2 weeks; ₱0 if disabled)
 ///   sunday pay         = daily rate × approved Sundays worked (by request)
 ///   net pay            = semi-monthly basic + overtime pay
 ///                         + office incentive + mobile incentive + sunday pay
@@ -249,11 +249,6 @@ public class PayrollService
 
         var workDayPattern = staff.WorkDays ?? "mon_fri";
 
-        // Mondays of the weeks in which the staff actually had a workday
-        // (present or on paid leave). Drives the mobile incentive so a week
-        // with no attendance never pays.
-        var activeWeekMondays = new HashSet<DateOnly>();
-
         foreach (var day in Workdays(period.Start, period.End, workDayPattern))
         {
             string status;
@@ -275,7 +270,6 @@ public class PayrollService
                 {
                     status = "present";
                     worked++;
-                    activeWeekMondays.Add(WeekMonday(day));
                     if (dayEntry?.WorkSetup == "office")
                     {
                         officeAllowanceDays++;
@@ -291,7 +285,6 @@ public class PayrollService
                 {
                     status = "paid_leave";
                     paidLeave++;
-                    activeWeekMondays.Add(WeekMonday(day));
                 }
                 else
                 {
@@ -388,7 +381,6 @@ public class PayrollService
             if (workedRestDay)
             {
                 sundayDays++;
-                activeWeekMondays.Add(WeekMonday(d));
                 if (rEntry?.WorkSetup == "office") officeAllowanceDays++;
             }
 
@@ -481,19 +473,13 @@ public class PayrollService
             var officeRate = staff.OfficeIncentiveEnabled ? staff.OfficeIncentiveAmount : 0m;
             var officeAllowance = Round(officeRate * officeAllowanceDays);
 
-            // Mobile incentive: per-staff rate × weeks (Mon–Sun).
-            //   A week belongs to the cutoff that contains its MONDAY, so a week
-            //   straddling the 15th/16th boundary is paid in exactly one cutoff
-            //   (never double-counted across the month).
-            //   Fixed-salary staff → every such week in the cutoff (attendance-
-            //     independent). Everyone else → only weeks they actually worked
-            //     (present or paid leave). Disabled → ₱0 (shown for transparency).
-            var isFixed = staff.FixedSalary && salaryMode == "basic";
-            var weeksWithWorkdays = isFixed
-                ? CountWeeksInPeriod(period, workDayPattern)
-                : activeWeekMondays.Count(m => m >= period.Start && m <= period.End);
+            // Mobile incentive: per-staff rate × the number of Sundays in the
+            // cutoff (attendance-independent). Each Sunday inside the cutoff
+            // counts as one "week" — e.g. cutoff Sep 1–15 has Sundays Sep 6 and
+            // Sep 13 → 2 weeks. Disabled → ₱0 (still shown for transparency).
+            var mobileWeeks = CountSundays(period);
             var mobileRate = staff.MobileIncentiveEnabled ? staff.MobileIncentiveAmount : 0m;
-            var mobileAllowance = Round(mobileRate * weeksWithWorkdays);
+            var mobileAllowance = Round(mobileRate * mobileWeeks);
 
             // Sunday work (by request): flat +1 daily rate per approved Sunday worked,
             // added on top of the base pay in every salary mode.
@@ -539,7 +525,7 @@ public class PayrollService
                 OfficeAllowance = officeAllowance,
                 MobileIncentiveEnabled = staff.MobileIncentiveEnabled,
                 MobileIncentiveRate = mobileRate,
-                MobileIncentiveWeeks = weeksWithWorkdays,
+                MobileIncentiveWeeks = mobileWeeks,
                 MobileAllowance = mobileAllowance,
                 SundayDays = sundayDays,
                 SundayPay = sundayPay,
@@ -669,27 +655,19 @@ public class PayrollService
     private static decimal Round(decimal value) =>
         Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
-    /// <summary>Monday that starts the Monday–Sunday week containing <paramref name="d"/>.</summary>
-    private static DateOnly WeekMonday(DateOnly d) =>
-        d.AddDays(-(int)d.DayOfWeek + (d.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
-
     /// <summary>
-    /// Count of distinct Mon–Sun weeks whose MONDAY falls within the cutoff and
-    /// that contain at least one workday (per the work-week pattern). Counting by
-    /// the week's Monday ensures a boundary week belongs to exactly one cutoff.
-    /// Used for the fixed-salary mobile incentive (attendance-independent).
+    /// Count of Sundays in the cutoff's date range (inclusive). Drives the
+    /// mobile incentive: one payout per Sunday in the cutoff (e.g. Sep 1–15 has
+    /// Sundays Sep 6 and Sep 13 → 2 weeks). Attendance-independent by policy, so
+    /// every active staff member gets the same week count in a given cutoff.
     /// </summary>
-    private static int CountWeeksInPeriod(PayrollPeriod period, string workDays)
+    private static int CountSundays(PayrollPeriod period)
     {
-        var mondays = new HashSet<DateOnly>();
-        foreach (var d in Workdays(period.Start, period.End, workDays))
+        var sundays = 0;
+        for (var d = period.Start; d <= period.End; d = d.AddDays(1))
         {
-            var monday = WeekMonday(d);
-            if (monday >= period.Start && monday <= period.End)
-            {
-                mondays.Add(monday);
-            }
+            if (d.DayOfWeek == DayOfWeek.Sunday) sundays++;
         }
-        return mondays.Count;
+        return sundays;
     }
 }
