@@ -47,8 +47,10 @@ namespace PinoyRideHrApi.Services;
 /// a time_entries row nor an approved leave request covering it (approving a
 /// leave writes an 'adjusted' entry, so approved leave is never deducted).
 /// Overtime hours are counted only on workdays with an APPROVED overtime
-/// request, for the hours worked beyond the standard 8-hour day. Days in the
-/// future are shown as upcoming and never counted as absences.
+/// request, for the hours worked beyond the standard 8-hour day. Future days
+/// are shown as upcoming and never counted as absences — EXCEPT future days
+/// that already carry a complete approved adjustment entry (a pre-scheduled
+/// time in/out): those count as worked and land on the payslip immediately.
 /// </summary>
 public class PayrollService
 {
@@ -252,20 +254,38 @@ public class PayrollService
         foreach (var day in Workdays(period.Start, period.End, workDayPattern))
         {
             string status;
+            // A day is only "present" when a COMPLETE entry exists (in + out).
+            // An entry with a clock-in but NO clock-out is incomplete — it
+            // counts as ABSENT ("no clock out") until the staff files an
+            // approved correction.
+            var dayEntry = entries.FirstOrDefault(e => e.WorkDate == day);
+            var hasEntry = dayEntry is not null;
+            var hasClockOut = dayEntry?.TimeOut is not null;
+
             if (day > today)
             {
-                status = "upcoming";
+                // Future days stay "upcoming" and unpaid UNLESS a complete entry
+                // was already written for them — i.e. an approved FUTURE-dated
+                // adjustment that pre-scheduled the time in/out. Those count as
+                // worked so they reach the payslip right away.
+                if (hasEntry && hasClockOut)
+                {
+                    countedWorkdays++;
+                    status = "present";
+                    worked++;
+                    if (dayEntry?.WorkSetup == "office")
+                    {
+                        officeAllowanceDays++;
+                    }
+                }
+                else
+                {
+                    status = "upcoming";
+                }
             }
             else
             {
                 countedWorkdays++;
-                var dayEntry = entries.FirstOrDefault(e => e.WorkDate == day);
-                var hasEntry = dayEntry is not null;
-                // An entry with a clock-in but NO clock-out is incomplete — it
-                // counts as ABSENT ("no clock out") until the staff files an
-                // approved correction. Only a complete in+out entry is "present".
-                var hasClockOut = dayEntry?.TimeOut is not null;
-
                 if (hasEntry && hasClockOut)
                 {
                     status = "present";
