@@ -240,14 +240,11 @@ public class PayrollController : ControllerBase
     private static readonly ReportColumn[] ReportColumns =
     {
         Text("Employee", s => s.Staff.FullName),
-        Text("SalaryMode", s => s.Computation?.SalaryMode ?? s.Staff.SalaryMode ?? "basic"),
         Num("BasicSalary", s => s.Staff.BasicSalary, "0.00"),
         Num("DailyRate", s => s.Computation?.DailyRate, "0.00"),
         Num("Workdays", s => s.Computation?.Workdays, "0"),
         Num("DaysWorked", s => s.Computation?.WorkedDays, "0"),
         Num("PaidLeaveDays", s => s.Computation?.PaidLeaveDays, "0"),
-        Num("AbsentDays", s => s.Computation?.AbsentDays, "0"),
-        Num("SemiMonthlyBasic", s => s.Computation?.SemiMonthlyBasic, "0.00"),
         Num("AbsenceDeduction", s => s.Computation?.AbsenceDeduction, "0.00"),
         Num("OvertimeHours", s => s.Computation?.OvertimeHours, "0.##"),
         Num("OvertimePay", s => s.Computation?.OvertimePay, "0.00"),
