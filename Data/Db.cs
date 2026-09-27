@@ -131,6 +131,31 @@ public class Db
                 created_at timestamptz not null default now()
             );
 
+            -- HR cancellation of an approved deduction (partial or full). The
+            -- cancelled part is added back to net pay; audit_log keeps the history.
+            alter table public.deductions
+                add column if not exists cancelled_amount numeric(12, 2) not null default 0;
+            alter table public.deductions
+                add column if not exists cancelled_by uuid references public.profiles (id);
+            alter table public.deductions
+                add column if not exists cancelled_at timestamptz;
+            alter table public.deductions
+                add column if not exists cancellation_note text;
+
+            -- Guard against over-cancelling. Added separately (not inline) so
+            -- databases that already have the column still get the constraint.
+            do $$
+            begin
+              if not exists (
+                select 1 from pg_constraint where conname = 'deductions_cancelled_within_amount'
+              ) then
+                alter table public.deductions
+                  add constraint deductions_cancelled_within_amount
+                  check (cancelled_amount >= 0 and cancelled_amount <= amount);
+              end if;
+            end
+            $$;
+
             create index if not exists deductions_approver_status_idx on public.deductions (approver_id, status);
             create index if not exists deductions_user_idx on public.deductions (user_id);
             create index if not exists deductions_resolved_idx on public.deductions (resolved_at);

@@ -89,6 +89,13 @@ public class Deduction
     public DateTime? CreatedAt { get; set; }
     public string? FullName { get; set; }
     public string? Email { get; set; }
+
+    // HR cancellation (partial or full). CancelledAmount is cumulative.
+    public decimal CancelledAmount { get; set; }
+    public Guid? CancelledBy { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancellationNote { get; set; }
+    public string? CancelledByName { get; set; }
 }
 
 public class AuditLog
@@ -137,10 +144,18 @@ public class PayrollReimbursementLine
 }
 
 // One approved deduction / cash advance shown on a payslip.
+// Amount is the REMAINING (effective) amount — the approved amount minus any
+// part HR cancelled — so payroll totals and the UI both use the live figure.
+// OriginalAmount / CancelledAmount are kept for the "cancelled by ..." note.
 public class PayrollDeductionLine
 {
+    public long Id { get; set; }
     public string? Note { get; set; }
     public decimal Amount { get; set; }
+    public decimal OriginalAmount { get; set; }
+    public decimal CancelledAmount { get; set; }
+    public string? CancelledByName { get; set; }
+    public string? CancellationNote { get; set; }
 }
 
 public class PayrollComputation

@@ -202,6 +202,81 @@ public class DeductionsController : ControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// POST /api/deductions/{id}/cancel — HR admin cancels all or part of an
+    /// APPROVED deduction. The cancelled amount is added back to the payslip
+    /// (the deduction line keeps only its remaining amount). Repeated calls
+    /// accumulate; each one is written to audit_log. Idempotently refuses to
+    /// over-cancel or to touch pending/rejected requests.
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    [Authorize(Policy = "HrAdmin")]
+    public async Task<IActionResult> Cancel(long id, [FromBody] CancelDeductionRequest? request)
+    {
+        var uid = CurrentUserId();
+
+        // Amount is required, must be > 0, and is rounded to 2dp like money.
+        if (request?.Amount is null || request.Amount <= 0)
+        {
+            return StatusCode(422, new { error = "amount must be greater than zero." });
+        }
+        var amount = Math.Round(request.Amount.Value, 2, MidpointRounding.AwayFromZero);
+        var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var ded = await con.QuerySingleOrDefaultAsync<Deduction>(
+            "select * from deductions where id = @Id for update",
+            new { Id = id }, tx);
+        if (ded is null)
+        {
+            throw new ApiException(404, "Deduction request not found.");
+        }
+        if (ded.Status != "approved")
+        {
+            return StatusCode(409, new { error = "Only an approved deduction can be cancelled." });
+        }
+
+        var alreadyCancelled = ded.CancelledAmount < 0 ? 0m : ded.CancelledAmount;
+        var remaining = ded.Amount - alreadyCancelled;
+        if (remaining <= 0)
+        {
+            return StatusCode(409, new { error = "This deduction has already been fully cancelled." });
+        }
+        if (amount > remaining)
+        {
+            return StatusCode(422, new { error = $"Cannot cancel {amount:0.00}; only {remaining:0.00} remains of this deduction." });
+        }
+
+        var updated = await con.QuerySingleAsync<Deduction>(
+            """
+            update deductions
+            set cancelled_amount = coalesce(cancelled_amount, 0) + @Amount,
+                cancelled_by = @Uid::uuid,
+                cancelled_at = now(),
+                cancellation_note = coalesce(@Note, cancellation_note)
+            where id = @Id
+            returning *
+            """,
+            new { Amount = amount, Uid = uid, Note = note, Id = id }, tx);
+
+        await _audit.AddAsync(con, tx, uid, "cancel_deduction", "deductions", updated.Id.ToString(),
+            new
+            {
+                user_id = ded.UserId,
+                note = ded.Note,
+                approved_amount = ded.Amount,
+                cancelled_this_time = amount,
+                cancelled_total = updated.CancelledAmount,
+                remaining_after = updated.Amount - updated.CancelledAmount,
+                reason = note
+            });
+
+        tx.Commit();
+        return Ok(updated);
+    }
+
     /// <summary>POST /api/deductions/{id}/reject — rejects with a required note.</summary>
     [HttpPost("{id:long}/reject")]
     [Authorize(Policy = "ApproverOrAbove")]

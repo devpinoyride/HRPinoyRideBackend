@@ -237,22 +237,41 @@ public class PayrollService
 
         // Approved deductions / cash advances approved within the cutoff. They
         // are SUBTRACTED from the payslip, in every salary mode.
+        // Any part HR has cancelled is added back, so only the REMAINING amount
+        // is deducted and net pay reflects the cancellation.
         var approvedDeductions = (await con.QueryAsync<Deduction>(
             """
-            select id, user_id, note, amount
-            from deductions
-            where user_id = @Uid::uuid and status = 'approved'
-              and (resolved_at at time zone 'Asia/Manila')::date between @From and @To
-            order by resolved_at asc
+            select d.id, d.user_id, d.note, d.amount, d.cancelled_amount, d.cancellation_note,
+                   c.full_name as cancelled_by_name
+            from deductions d
+            left join profiles c on c.id = d.cancelled_by
+            where d.user_id = @Uid::uuid and d.status = 'approved'
+              and (d.resolved_at at time zone 'Asia/Manila')::date between @From and @To
+            order by d.resolved_at asc
             """,
             new { Uid = staff.Id, From = period.Start, To = period.End })).AsList();
         var deductionTotal = 0m;
-        foreach (var d in approvedDeductions) deductionTotal += d.Amount;
-        var deductionLines = approvedDeductions.Select(d => new PayrollDeductionLine
+        var deductionLines = new List<PayrollDeductionLine>();
+        foreach (var d in approvedDeductions)
         {
-            Note = d.Note,
-            Amount = d.Amount
-        }).ToList();
+            // Clamp defensively: a cancellation can never exceed the approved amount.
+            var cancelled = d.CancelledAmount < 0 ? 0m : d.CancelledAmount;
+            if (cancelled > d.Amount) cancelled = d.Amount;
+            var remaining = d.Amount - cancelled;
+
+            // Only the remaining amount is deducted from this payslip.
+            deductionTotal += remaining;
+            deductionLines.Add(new PayrollDeductionLine
+            {
+                Id = d.Id,
+                Note = d.Note,
+                Amount = remaining,
+                OriginalAmount = d.Amount,
+                CancelledAmount = cancelled,
+                CancelledByName = d.CancelledByName,
+                CancellationNote = d.CancellationNote
+            });
+        }
 
         var entryDates = entries.Select(e => e.WorkDate).ToHashSet();
 

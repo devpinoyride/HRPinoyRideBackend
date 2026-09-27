@@ -63,6 +63,14 @@ public class CreateDeductionRequest
     public decimal? Amount { get; set; }
 }
 
+// HR cancels (fully or partially) an amount of an APPROVED deduction. The
+// cancelled part is added back to the staff member's net pay.
+public class CancelDeductionRequest
+{
+    public decimal? Amount { get; set; }   // how much of the deduction to cancel
+    public string? Note { get; set; }       // optional reason, kept for audit
+}
+
 public class CreateStaffRequest
 {
     public string? Email { get; set; }

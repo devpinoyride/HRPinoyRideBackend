@@ -178,6 +178,14 @@ create table if not exists public.deductions (
   status          public.request_status not null default 'pending',
   approver_notes  text,
   resolved_at     timestamptz,
+  -- HR may partially or fully cancel an APPROVED deduction; the cancelled part is
+  -- added back to net pay. cancelled_amount is cumulative and can never exceed
+  -- amount. The per-cancellation history lives in audit_log.
+  cancelled_amount  numeric(12, 2) not null default 0
+                    check (cancelled_amount >= 0 and cancelled_amount <= amount),
+  cancelled_by      uuid references public.profiles (id),
+  cancelled_at      timestamptz,
+  cancellation_note text,
   created_at      timestamptz not null default now()
 );
 
