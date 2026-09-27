@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
@@ -142,8 +143,10 @@ public class PayrollController : ControllerBase
 
     /// <summary>
     /// GET /api/payroll/export?year=&amp;month=&amp;cutoff= — bulk payroll for the
-    /// chosen cutoff as a CSV file (one row per staff member). HR admin only.
-    /// Mirrors the summary computation and includes the incentive breakdown.
+    /// chosen cutoff as a printable, styled payslip summary table (one row per
+    /// staff member). HR admin only. Mirrors the summary computation and includes
+    /// the incentive breakdown. Columns that are zero/blank/null for every staff
+    /// member are omitted so the printed report only shows real data.
     /// </summary>
     [HttpGet("export")]
     [Authorize(Policy = "HrAdmin")]
@@ -156,14 +159,6 @@ public class PayrollController : ControllerBase
         var finalized = await _payroll.IsFinalizedAsync(period);
         var snapshotSlips = finalized ? await _payroll.GetSnapshotsAsync(period) : null;
         var staff = finalized ? new List<Profile>() : await _payroll.GetStaffAsync();
-
-        var sb = new StringBuilder();
-        // Human-readable header block so the exported file documents the cutoff.
-        sb.Append("Pinoy Ride — Payroll ").Append(period.Cutoff == 1 ? "Cutoff 1 (1–15)" : "Cutoff 2 (16–end of month)")
-          .Append(' ').Append(period.Start.ToString("yyyy-MM-dd")).Append(" to ").Append(period.End.ToString("yyyy-MM-dd"))
-          .AppendLine();
-        sb.AppendLine();
-        sb.AppendLine("Employee,Email,Department,Position,Role,Status,SalaryMode,BasicSalary,DailyRate,Workdays,DaysWorked,PaidLeaveDays,AbsentDays,SemiMonthlyBasic,AbsenceDeduction,OvertimeHours,OvertimePay,OfficeIncentive,MobileIncentive,Reimbursements,CashAdvances,SundayDays,SundayPay,NetPay");
 
         // Unified list of payslips to export: snapshots (finalized) or live compute.
         var exportSlips = new List<PayrollPayslip>();
@@ -179,48 +174,247 @@ public class PayrollController : ControllerBase
             }
         }
 
+        // Hide any column whose value is zero/blank/null for every employee, so the
+        // printed summary only shows the data this cutoff actually has. Employee is
+        // the row label, so it is always kept regardless of its values.
+        var columns = ReportColumns
+            .Where(c => c.Header == "Employee" || exportSlips.Any(s => !ReportCellEmpty(c.Value(s), c)))
+            .ToList();
+
         decimal totalNet = 0m;
         foreach (var slip in exportSlips)
         {
-            var person = slip.Staff;
-            var c = slip.Computation;
-            totalNet += c?.NetPay ?? 0m;
-
-            sb.Append(Csv(person.FullName)).Append(',')
-              .Append(Csv(person.Email)).Append(',')
-              .Append(Csv(person.Department)).Append(',')
-              .Append(Csv(person.Position)).Append(',')
-              .Append(Csv(person.Role)).Append(',')
-              .Append(Csv(person.Status)).Append(',')
-              .Append(Csv(c?.SalaryMode ?? person.SalaryMode ?? "basic")).Append(',')
-              .Append(Csv(person.BasicSalary?.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.DailyRate.ToString("0.00"))).Append(',')
-              .Append(Csv((c?.Workdays ?? 0).ToString())).Append(',')
-              .Append(Csv((c?.WorkedDays ?? 0).ToString())).Append(',')
-              .Append(Csv((c?.PaidLeaveDays ?? 0).ToString())).Append(',')
-              .Append(Csv((c?.AbsentDays ?? 0).ToString())).Append(',')
-              .Append(Csv(c is null ? "" : c.SemiMonthlyBasic.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.AbsenceDeduction.ToString("0.00"))).Append(',')
-              .Append(Csv((c?.OvertimeHours ?? 0).ToString("0.##"))).Append(',')
-              .Append(Csv(c is null ? "" : c.OvertimePay.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.OfficeAllowance.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.MobileAllowance.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.ReimbursementTotal.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.DeductionTotal.ToString("0.00"))).Append(',')
-              .Append(Csv((c?.SundayDays ?? 0).ToString())).Append(',')
-              .Append(Csv(c is null ? "" : c.SundayPay.ToString("0.00"))).Append(',')
-              .Append(Csv(c is null ? "" : c.NetPay.ToString("0.00")))
-              .AppendLine();
+            totalNet += slip.Computation?.NetPay ?? 0m;
         }
 
-        // Trailing total row for quick reconciliation (24 columns → 23 commas).
-        sb.AppendLine();
-        sb.Append("TOTAL NET PAY").Append(',', 23).Append(totalNet.ToString("0.00")).AppendLine();
+        var sb = new StringBuilder();
+        sb.AppendLine("<!DOCTYPE html>");
+        sb.AppendLine("<html lang=\"en\"><head><meta charset=\"utf-8\" />");
+        sb.Append("<title>Payroll Cutoff ").Append(Html(period.Start.ToString("yyyy-MM-dd")))
+          .Append(" to ").Append(Html(period.End.ToString("yyyy-MM-dd"))).AppendLine("</title>");
+        sb.Append("<style>").AppendLine(ReportStyles).AppendLine("</style></head><body>");
+
+        // Bordered, centered title bar documenting the cutoff period.
+        sb.Append("<div class=\"title-bar\">Payroll Cutoff ")
+          .Append(Html(period.Start.ToString("yyyy-MM-dd")))
+          .Append(" to ")
+          .Append(Html(period.End.ToString("yyyy-MM-dd")))
+          .Append("</div>");
+
+        if (exportSlips.Count == 0)
+        {
+            sb.AppendLine("<p class=\"empty\">No staff found for this cutoff.</p></body></html>");
+            var emptyBytes = Encoding.UTF8.GetBytes(sb.ToString());
+            var emptyName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.html";
+            return File(emptyBytes, "text/html; charset=utf-8", emptyName);
+        }
+
+        sb.AppendLine("<table class=\"payslip-summary\">");
+        sb.Append("<thead><tr>");
+        foreach (var col in columns)
+        {
+            sb.Append("<th").Append(col.IsNumeric ? " class=\"num\"" : "").Append('>')
+              .Append(Html(col.Header)).Append("</th>");
+        }
+        sb.AppendLine("</tr></thead>");
+
+        sb.AppendLine("<tbody>");
+        foreach (var slip in exportSlips)
+        {
+            sb.Append("<tr>");
+            foreach (var col in columns)
+            {
+                sb.Append("<td").Append(col.CssClass).Append('>')
+                  .Append(Html(col.Format(col.Value(slip))))
+                  .Append("</td>");
+            }
+            sb.AppendLine("</tr>");
+        }
+        sb.AppendLine("</tbody>");
+
+        // Trailing total row for quick reconciliation, with a divider line above it.
+        sb.AppendLine("<tfoot><tr>");
+        foreach (var col in columns)
+        {
+            sb.Append("<td");
+            if (col.Header == "NetPay")
+            {
+                sb.Append(" class=\"num total-value\"");
+            }
+            else if (col.Header == "Employee")
+            {
+                sb.Append(" class=\"total-label\"");
+            }
+            sb.Append('>')
+              .Append(col.Header switch
+              {
+                  "Employee" => Html("TOTAL NET PAY"),
+                  "NetPay" => Html(FormatAmount(totalNet)),
+                  _ => ""
+              })
+              .Append("</td>");
+        }
+        sb.AppendLine("</tr></tfoot>");
+
+        sb.AppendLine("</table></body></html>");
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-        var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.csv";
-        return File(bytes, "text/csv", fileName);
+        var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.html";
+        return File(bytes, "text/html; charset=utf-8", fileName);
     }
+
+    // ---- Payslip summary report (HTML) ---------------------------------------
+    //
+    // One ReportColumn per report column, declared in the original CSV export
+    // order. Value() returns the raw value so the "all zero / blank" column filter
+    // and the rendered cell text both derive from the same source; Format() only
+    // controls presentation.
+
+    private sealed record ReportColumn(string Header, Func<PayrollPayslip, object?> Value, bool IsNumeric, Func<object?, string> Format)
+    {
+        /// <summary>Cell class: numeric columns right-align, the employee name stands out.</summary>
+        public string CssClass => Header switch
+        {
+            "Employee" => " class=\"employee\"",
+            _ when IsNumeric => " class=\"num\"",
+            _ => ""
+        };
+    }
+
+    private static readonly ReportColumn[] ReportColumns =
+    {
+        Text("Employee", s => s.Staff.FullName),
+        Text("Email", s => s.Staff.Email),
+        Text("Department", s => s.Staff.Department),
+        Text("Position", s => s.Staff.Position),
+        Text("Role", s => s.Staff.Role),
+        Text("Status", s => s.Staff.Status),
+        Text("SalaryMode", s => s.Computation?.SalaryMode ?? s.Staff.SalaryMode ?? "basic"),
+        Num("BasicSalary", s => s.Staff.BasicSalary, "0.00"),
+        Num("DailyRate", s => s.Computation?.DailyRate, "0.00"),
+        Num("Workdays", s => s.Computation?.Workdays, "0"),
+        Num("DaysWorked", s => s.Computation?.WorkedDays, "0"),
+        Num("PaidLeaveDays", s => s.Computation?.PaidLeaveDays, "0"),
+        Num("AbsentDays", s => s.Computation?.AbsentDays, "0"),
+        Num("SemiMonthlyBasic", s => s.Computation?.SemiMonthlyBasic, "0.00"),
+        Num("AbsenceDeduction", s => s.Computation?.AbsenceDeduction, "0.00"),
+        Num("OvertimeHours", s => s.Computation?.OvertimeHours, "0.##"),
+        Num("OvertimePay", s => s.Computation?.OvertimePay, "0.00"),
+        Num("OfficeIncentive", s => s.Computation?.OfficeAllowance, "0.00"),
+        Num("MobileIncentive", s => s.Computation?.MobileAllowance, "0.00"),
+        Num("Reimbursements", s => s.Computation?.ReimbursementTotal, "0.00"),
+        Num("CashAdvances", s => s.Computation?.DeductionTotal, "0.00"),
+        Num("SundayDays", s => s.Computation?.SundayDays, "0"),
+        Num("SundayPay", s => s.Computation?.SundayPay, "0.00"),
+        Num("NetPay", s => s.Computation?.NetPay, "0.00"),
+    };
+
+    private static ReportColumn Text(string header, Func<PayrollPayslip, object?> value) =>
+        new(header, value, false, v => v?.ToString() ?? "");
+
+    private static ReportColumn Num(string header, Func<PayrollPayslip, object?> value, string format) =>
+        new(header, value, true, v => v is null ? "" : Convert.ToDecimal(v, CultureInfo.InvariantCulture).ToString(format, CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// True when a cell carries no information: null, blank text, or numeric zero.
+    /// A column where every employee is "empty" is dropped from the report.
+    /// </summary>
+    private static bool ReportCellEmpty(object? value, ReportColumn column)
+    {
+        if (value is null)
+        {
+            return true;
+        }
+        if (value is string s)
+        {
+            return string.IsNullOrWhiteSpace(s);
+        }
+        if (value is bool b)
+        {
+            return !b;
+        }
+        // Whole-day/hour counts (int, long) and money/hours (decimal, double).
+        return column.IsNumeric && decimal.TryParse(
+            Convert.ToString(value, CultureInfo.InvariantCulture),
+            NumberStyles.Any,
+            CultureInfo.InvariantCulture,
+            out var d) && d == 0m;
+    }
+
+    /// <summary>Escapes a value for safe interpolation into HTML text/attributes.</summary>
+    private static string Html(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "");
+
+    private static string FormatAmount(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    // Self-contained print styles: bordered title bar, bold shaded header, zebra
+    // rows, dark-blue left-aligned employee names, right-aligned plain numbers,
+    // and a divider above the total row.
+    private const string ReportStyles = @"
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Verdana, sans-serif;
+            font-size: 11px;
+            color: #1f2933;
+            margin: 0;
+            padding: 16px;
+            background: #fff;
+        }
+        .title-bar {
+            border: 2px solid #1f3a5f;
+            border-radius: 4px;
+            background: #e8eef7;
+            color: #1f3a5f;
+            font-size: 15px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: .3px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }
+        table.payslip-summary {
+            border: 2px solid #1f3a5f;
+            border-collapse: collapse;
+            width: 100%;
+        }
+        table.payslip-summary th,
+        table.payslip-summary td {
+            border: 1px solid #9fb3c8;
+            padding: 5px 7px;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        table.payslip-summary thead th {
+            background: #dce6f2;
+            color: #1f3a5f;
+            font-weight: 700;
+            text-align: left;
+            border-bottom: 2px solid #1f3a5f;
+        }
+        table.payslip-summary thead th.num { text-align: right; }
+        table.payslip-summary td.employee {
+            color: #14396b;
+            font-weight: 600;
+            text-align: left;
+        }
+        table.payslip-summary td.num { text-align: right; }
+        table.payslip-summary tbody tr:nth-child(even) { background: #eef7ee; }
+        table.payslip-summary tbody tr:nth-child(odd) { background: #fff; }
+        table.payslip-summary tfoot td {
+            font-weight: 700;
+            background: #e8eef7;
+            border-top: 2px solid #1f3a5f;
+        }
+        table.payslip-summary tfoot td.total-label { text-align: left; color: #1f3a5f; }
+        table.payslip-summary tfoot td.total-value { text-align: right; color: #1f3a5f; }
+        p.empty { padding: 12px; text-align: center; color: #52606d; }
+        @media print {
+            @page { size: landscape; margin: 8mm; }
+            body { padding: 0; }
+            table.payslip-summary thead { display: table-header-group; }
+            table.payslip-summary tfoot { display: table-footer-group; }
+            table.payslip-summary tr { page-break-inside: avoid; }
+        }
+    ";
 
     /// <summary>
     /// GET /api/payroll/attendance-export?year=&amp;month=&amp;cutoff= — bulk attendance
