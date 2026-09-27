@@ -146,7 +146,9 @@ public class PayrollController : ControllerBase
     /// chosen cutoff as a printable, styled payslip summary table (one row per
     /// staff member). HR admin only. Mirrors the summary computation and includes
     /// the incentive breakdown. Columns that are zero/blank/null for every staff
-    /// member are omitted so the printed report only shows real data.
+    /// member are omitted so the printed report only shows real data. Only the
+    /// payroll breakdown is listed — the profile columns (Email, Department,
+    /// Position, Role, Status) are not part of the summary.
     /// </summary>
     [HttpGet("export")]
     [Authorize(Policy = "HrAdmin")]
@@ -265,9 +267,11 @@ public class PayrollController : ControllerBase
 
     // ---- Payslip summary report (HTML) ---------------------------------------
     //
-    // One ReportColumn per report column, declared in the original CSV export
-    // order. Value() returns the raw value so the "all zero / blank" column filter
-    // and the rendered cell text both derive from the same source; Format() only
+    // One ReportColumn per report column. This is the numeric payroll breakdown
+    // only — the identity/profile columns (Email, Department, Position, Role,
+    // Status) are deliberately excluded; the employee name is the row label.
+    // Value() returns the raw value so the "all zero / blank" column filter and
+    // the rendered cell text both derive from the same source; Format() only
     // controls presentation.
 
     private sealed record ReportColumn(string Header, Func<PayrollPayslip, object?> Value, bool IsNumeric, Func<object?, string> Format)
@@ -284,11 +288,6 @@ public class PayrollController : ControllerBase
     private static readonly ReportColumn[] ReportColumns =
     {
         Text("Employee", s => s.Staff.FullName),
-        Text("Email", s => s.Staff.Email),
-        Text("Department", s => s.Staff.Department),
-        Text("Position", s => s.Staff.Position),
-        Text("Role", s => s.Staff.Role),
-        Text("Status", s => s.Staff.Status),
         Text("SalaryMode", s => s.Computation?.SalaryMode ?? s.Staff.SalaryMode ?? "basic"),
         Num("BasicSalary", s => s.Staff.BasicSalary, "0.00"),
         Num("DailyRate", s => s.Computation?.DailyRate, "0.00"),
