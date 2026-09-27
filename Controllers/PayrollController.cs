@@ -189,80 +189,41 @@ public class PayrollController : ControllerBase
             totalNet += slip.Computation?.NetPay ?? 0m;
         }
 
-        var sb = new StringBuilder();
-        sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html lang=\"en\"><head><meta charset=\"utf-8\" />");
-        sb.Append("<title>Payroll Cutoff ").Append(Html(period.Start.ToString("yyyy-MM-dd")))
-          .Append(" to ").Append(Html(period.End.ToString("yyyy-MM-dd"))).AppendLine("</title>");
-        sb.Append("<style>").AppendLine(ReportStyles).AppendLine("</style></head><body>");
+        // Border values are applied by the renderer from the column's own class,
+        // so we only pass labels + per-column alignment + the already-formatted text.
+        var headers = columns.Select(c => c.Header).ToList();
+        var numericFlags = columns.Select(c => c.IsNumeric).ToList();
 
-        // Bordered, centered title bar documenting the cutoff period.
-        sb.Append("<div class=\"title-bar\">Payroll Cutoff ")
-          .Append(Html(period.Start.ToString("yyyy-MM-dd")))
-          .Append(" to ")
-          .Append(Html(period.End.ToString("yyyy-MM-dd")))
-          .Append("</div>");
+        var rows = exportSlips
+            .Select(slip => (IReadOnlyList<string>)columns.Select(c => c.Format(c.Value(slip))).ToList())
+            .ToList();
+
+        // Bold total row: label under Employee, summed net pay under NetPay.
+        var totalRow = columns
+            .Select(col => col.Header switch
+            {
+                "Employee" => "TOTAL NET PAY",
+                "NetPay" => FormatAmount(totalNet),
+                _ => ""
+            })
+            .ToList();
+
+        var title = $"Payroll Cutoff {period.Start:yyyy-MM-dd} to {period.End:yyyy-MM-dd}";
 
         if (exportSlips.Count == 0)
         {
-            sb.AppendLine("<p class=\"empty\">No staff found for this cutoff.</p></body></html>");
-            var emptyBytes = Encoding.UTF8.GetBytes(sb.ToString());
-            var emptyName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.html";
-            return File(emptyBytes, "text/html; charset=utf-8", emptyName);
-        }
-
-        sb.AppendLine("<table class=\"payslip-summary\">");
-        sb.Append("<thead><tr>");
-        foreach (var col in columns)
-        {
-            sb.Append("<th").Append(col.IsNumeric ? " class=\"num\"" : "").Append('>')
-              .Append(Html(col.Header)).Append("</th>");
-        }
-        sb.AppendLine("</tr></thead>");
-
-        sb.AppendLine("<tbody>");
-        foreach (var slip in exportSlips)
-        {
-            sb.Append("<tr>");
-            foreach (var col in columns)
+            headers = new List<string> { "Notice" };
+            numericFlags = new List<bool> { false };
+            rows = new List<IReadOnlyList<string>>
             {
-                sb.Append("<td").Append(col.CssClass).Append('>')
-                  .Append(Html(col.Format(col.Value(slip))))
-                  .Append("</td>");
-            }
-            sb.AppendLine("</tr>");
+                new List<string> { "No staff found for this cutoff." }
+            };
+            totalRow = new List<string> { "" };
         }
-        sb.AppendLine("</tbody>");
 
-        // Trailing total row for quick reconciliation, with a divider line above it.
-        sb.AppendLine("<tfoot><tr>");
-        foreach (var col in columns)
-        {
-            sb.Append("<td");
-            if (col.Header == "NetPay")
-            {
-                sb.Append(" class=\"num total-value\"");
-            }
-            else if (col.Header == "Employee")
-            {
-                sb.Append(" class=\"total-label\"");
-            }
-            sb.Append('>')
-              .Append(col.Header switch
-              {
-                  "Employee" => Html("TOTAL NET PAY"),
-                  "NetPay" => Html(FormatAmount(totalNet)),
-                  _ => ""
-              })
-              .Append("</td>");
-        }
-        sb.AppendLine("</tr></tfoot>");
-
-        sb.AppendLine("</table></body></html>");
-
-        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-        var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.html";
-        return File(bytes, "text/html; charset=utf-8", fileName);
+        var bytes = PayslipPdfRenderer.Render(title, headers, numericFlags, rows, totalRow);
+        var fileName = $"payroll-{period.Year:D4}{period.Month:D2}-cutoff{period.Cutoff}.pdf";
+        return File(bytes, "application/pdf", fileName);
     }
 
     // ---- Payslip summary report (HTML) ---------------------------------------
@@ -274,16 +235,7 @@ public class PayrollController : ControllerBase
     // the rendered cell text both derive from the same source; Format() only
     // controls presentation.
 
-    private sealed record ReportColumn(string Header, Func<PayrollPayslip, object?> Value, bool IsNumeric, Func<object?, string> Format)
-    {
-        /// <summary>Cell class: numeric columns right-align, the employee name stands out.</summary>
-        public string CssClass => Header switch
-        {
-            "Employee" => " class=\"employee\"",
-            _ when IsNumeric => " class=\"num\"",
-            _ => ""
-        };
-    }
+    private sealed record ReportColumn(string Header, Func<PayrollPayslip, object?> Value, bool IsNumeric, Func<object?, string> Format);
 
     private static readonly ReportColumn[] ReportColumns =
     {
@@ -340,80 +292,7 @@ public class PayrollController : ControllerBase
             out var d) && d == 0m;
     }
 
-    /// <summary>Escapes a value for safe interpolation into HTML text/attributes.</summary>
-    private static string Html(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "");
-
     private static string FormatAmount(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
-
-    // Self-contained print styles: bordered title bar, bold shaded header, zebra
-    // rows, dark-blue left-aligned employee names, right-aligned plain numbers,
-    // and a divider above the total row.
-    private const string ReportStyles = @"
-        * { box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Verdana, sans-serif;
-            font-size: 11px;
-            color: #1f2933;
-            margin: 0;
-            padding: 16px;
-            background: #fff;
-        }
-        .title-bar {
-            border: 2px solid #1f3a5f;
-            border-radius: 4px;
-            background: #e8eef7;
-            color: #1f3a5f;
-            font-size: 15px;
-            font-weight: 700;
-            text-align: center;
-            letter-spacing: .3px;
-            padding: 10px 12px;
-            margin-bottom: 12px;
-        }
-        table.payslip-summary {
-            border: 2px solid #1f3a5f;
-            border-collapse: collapse;
-            width: 100%;
-        }
-        table.payslip-summary th,
-        table.payslip-summary td {
-            border: 1px solid #9fb3c8;
-            padding: 5px 7px;
-            white-space: nowrap;
-            vertical-align: middle;
-        }
-        table.payslip-summary thead th {
-            background: #dce6f2;
-            color: #1f3a5f;
-            font-weight: 700;
-            text-align: left;
-            border-bottom: 2px solid #1f3a5f;
-        }
-        table.payslip-summary thead th.num { text-align: right; }
-        table.payslip-summary td.employee {
-            color: #14396b;
-            font-weight: 600;
-            text-align: left;
-        }
-        table.payslip-summary td.num { text-align: right; }
-        table.payslip-summary tbody tr:nth-child(even) { background: #eef7ee; }
-        table.payslip-summary tbody tr:nth-child(odd) { background: #fff; }
-        table.payslip-summary tfoot td {
-            font-weight: 700;
-            background: #e8eef7;
-            border-top: 2px solid #1f3a5f;
-        }
-        table.payslip-summary tfoot td.total-label { text-align: left; color: #1f3a5f; }
-        table.payslip-summary tfoot td.total-value { text-align: right; color: #1f3a5f; }
-        p.empty { padding: 12px; text-align: center; color: #52606d; }
-        @media print {
-            @page { size: landscape; margin: 8mm; }
-            body { padding: 0; }
-            table.payslip-summary thead { display: table-header-group; }
-            table.payslip-summary tfoot { display: table-footer-group; }
-            table.payslip-summary tr { page-break-inside: avoid; }
-        }
-    ";
 
     /// <summary>
     /// GET /api/payroll/attendance-export?year=&amp;month=&amp;cutoff= — bulk attendance
