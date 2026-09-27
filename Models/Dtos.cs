@@ -55,6 +55,14 @@ public class CreateReimbursementRequest
     public decimal? Amount { get; set; }
 }
 
+// HR cancels (fully or partially) an amount of an APPROVED reimbursement. The
+// cancelled part is removed from the staff member's payslip again.
+public class CancelReimbursementRequest
+{
+    public decimal? Amount { get; set; }   // how much of the reimbursement to cancel
+    public string? Note { get; set; }       // optional reason, kept for audit
+}
+
 // A deduction / cash advance request. The amount is SUBTRACTED from the staff
 // member's payslip once an approver approves the request.
 public class CreateDeductionRequest

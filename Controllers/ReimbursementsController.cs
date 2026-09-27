@@ -152,6 +152,79 @@ public class ReimbursementsController : ControllerBase
         return Ok(rows);
     }
 
+    /// <summary>
+    /// POST /api/reimbursements/{id}/cancel — HR admin cancels all or part of an
+    /// APPROVED reimbursement. The cancelled amount is taken off the payslip
+    /// again (the line keeps only its remaining amount). Repeated calls
+    /// accumulate; each one is written to audit_log.
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    [Authorize(Policy = "HrAdmin")]
+    public async Task<IActionResult> Cancel(long id, [FromBody] CancelReimbursementRequest? request)
+    {
+        var uid = CurrentUserId();
+
+        if (request?.Amount is null || request.Amount <= 0)
+        {
+            return StatusCode(422, new { error = "amount must be greater than zero." });
+        }
+        var amount = Math.Round(request.Amount.Value, 2, MidpointRounding.AwayFromZero);
+        var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
+
+        using var con = _db.Open();
+        using var tx = con.BeginTransaction();
+
+        var rec = await con.QuerySingleOrDefaultAsync<Reimbursement>(
+            "select * from reimbursements where id = @Id for update",
+            new { Id = id }, tx);
+        if (rec is null)
+        {
+            throw new ApiException(404, "Reimbursement request not found.");
+        }
+        if (rec.Status != "approved")
+        {
+            return StatusCode(409, new { error = "Only an approved reimbursement can be cancelled." });
+        }
+
+        var alreadyCancelled = rec.CancelledAmount < 0 ? 0m : rec.CancelledAmount;
+        var remaining = rec.Amount - alreadyCancelled;
+        if (remaining <= 0)
+        {
+            return StatusCode(409, new { error = "This reimbursement has already been fully cancelled." });
+        }
+        if (amount > remaining)
+        {
+            return StatusCode(422, new { error = $"Cannot cancel {amount:0.00}; only {remaining:0.00} remains of this reimbursement." });
+        }
+
+        var updated = await con.QuerySingleAsync<Reimbursement>(
+            """
+            update reimbursements
+            set cancelled_amount = coalesce(cancelled_amount, 0) + @Amount,
+                cancelled_by = @Uid::uuid,
+                cancelled_at = now(),
+                cancellation_note = coalesce(@Note, cancellation_note)
+            where id = @Id
+            returning *
+            """,
+            new { Amount = amount, Uid = uid, Note = note, Id = id }, tx);
+
+        await _audit.AddAsync(con, tx, uid, "cancel_reimbursement", "reimbursements", updated.Id.ToString(),
+            new
+            {
+                user_id = rec.UserId,
+                note = rec.Note,
+                approved_amount = rec.Amount,
+                cancelled_this_time = amount,
+                cancelled_total = updated.CancelledAmount,
+                remaining_after = updated.Amount - updated.CancelledAmount,
+                reason = note
+            });
+
+        tx.Commit();
+        return Ok(updated);
+    }
+
     /// <summary>POST /api/reimbursements/{id}/approve — approves the request; the amount is then added to the staff member's payslip.</summary>
     [HttpPost("{id:long}/approve")]
     [Authorize(Policy = "ApproverOrAbove")]

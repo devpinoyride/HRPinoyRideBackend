@@ -117,6 +117,30 @@ public class Db
             create index if not exists reimbursements_user_idx on public.reimbursements (user_id);
             create index if not exists reimbursements_resolved_idx on public.reimbursements (resolved_at);
 
+            -- HR cancellation of an approved reimbursement (partial or full).
+            -- The cancelled part is taken off the payslip again; audit_log keeps
+            -- the history of each cancellation.
+            alter table public.reimbursements
+                add column if not exists cancelled_amount numeric(12, 2) not null default 0;
+            alter table public.reimbursements
+                add column if not exists cancelled_by uuid references public.profiles (id);
+            alter table public.reimbursements
+                add column if not exists cancelled_at timestamptz;
+            alter table public.reimbursements
+                add column if not exists cancellation_note text;
+
+            do $$
+            begin
+              if not exists (
+                select 1 from pg_constraint where conname = 'reimbursements_cancelled_within_amount'
+              ) then
+                alter table public.reimbursements
+                  add constraint reimbursements_cancelled_within_amount
+                  check (cancelled_amount >= 0 and cancelled_amount <= amount);
+              end if;
+            end
+            $$;
+
             -- Deductions / cash advances: staff file a request with a note +
             -- amount; the amount is SUBTRACTED from their payslip once approved.
             create table if not exists public.deductions (

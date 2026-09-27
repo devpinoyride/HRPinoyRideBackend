@@ -218,22 +218,41 @@ public class PayrollService
         // Approved reimbursements / additional incentives approved within the
         // cutoff (resolved_at in PH time). They land on the payslip of the
         // period containing the approval timestamp, in every salary mode.
+        // Any part HR has cancelled is removed again, so only the REMAINING
+        // amount is added to this payslip.
         var approvedReimbursements = (await con.QueryAsync<Reimbursement>(
             """
-            select id, user_id, note, amount
-            from reimbursements
-            where user_id = @Uid::uuid and status = 'approved'
-              and (resolved_at at time zone 'Asia/Manila')::date between @From and @To
-            order by resolved_at asc
+            select r.id, r.user_id, r.note, r.amount, r.cancelled_amount, r.cancellation_note,
+                   c.full_name as cancelled_by_name
+            from reimbursements r
+            left join profiles c on c.id = r.cancelled_by
+            where r.user_id = @Uid::uuid and r.status = 'approved'
+              and (r.resolved_at at time zone 'Asia/Manila')::date between @From and @To
+            order by r.resolved_at asc
             """,
             new { Uid = staff.Id, From = period.Start, To = period.End })).AsList();
         var reimbursementTotal = 0m;
-        foreach (var r in approvedReimbursements) reimbursementTotal += r.Amount;
-        var reimbursementLines = approvedReimbursements.Select(r => new PayrollReimbursementLine
+        var reimbursementLines = new List<PayrollReimbursementLine>();
+        foreach (var r in approvedReimbursements)
         {
-            Note = r.Note,
-            Amount = r.Amount
-        }).ToList();
+            // Clamp defensively: a cancellation can never exceed the approved amount.
+            var cancelled = r.CancelledAmount < 0 ? 0m : r.CancelledAmount;
+            if (cancelled > r.Amount) cancelled = r.Amount;
+            var remaining = r.Amount - cancelled;
+
+            // Only the remaining amount is added to this payslip.
+            reimbursementTotal += remaining;
+            reimbursementLines.Add(new PayrollReimbursementLine
+            {
+                Id = r.Id,
+                Note = r.Note,
+                Amount = remaining,
+                OriginalAmount = r.Amount,
+                CancelledAmount = cancelled,
+                CancelledByName = r.CancelledByName,
+                CancellationNote = r.CancellationNote
+            });
+        }
 
         // Approved deductions / cash advances approved within the cutoff. They
         // are SUBTRACTED from the payslip, in every salary mode.

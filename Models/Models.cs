@@ -74,6 +74,13 @@ public class Reimbursement
     public DateTime? CreatedAt { get; set; }
     public string? FullName { get; set; }
     public string? Email { get; set; }
+
+    // HR cancellation (partial or full). CancelledAmount is cumulative.
+    public decimal CancelledAmount { get; set; }
+    public Guid? CancelledBy { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancellationNote { get; set; }
+    public string? CancelledByName { get; set; }
 }
 
 public class Deduction
@@ -137,10 +144,17 @@ public class PayrollDayDetail
 }
 
 // One approved reimbursement / additional incentive shown on a payslip.
+// Amount is the REMAINING (effective) amount — the approved amount minus any
+// part HR cancelled — so the total and the UI both use the live figure.
 public class PayrollReimbursementLine
 {
+    public long Id { get; set; }
     public string? Note { get; set; }
     public decimal Amount { get; set; }
+    public decimal OriginalAmount { get; set; }
+    public decimal CancelledAmount { get; set; }
+    public string? CancelledByName { get; set; }
+    public string? CancellationNote { get; set; }
 }
 
 // One approved deduction / cash advance shown on a payslip.
