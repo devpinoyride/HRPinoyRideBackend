@@ -254,7 +254,7 @@ public class PayrollController : ControllerBase
         Num("OfficeIncentive", s => s.Computation?.OfficeAllowance, "0.00"),
         Num("MobileIncentive", s => s.Computation?.MobileAllowance, "0.00"),
         Num("Reimbursements", s => s.Computation?.ReimbursementTotal, "0.00"),
-        Num("CashAdvances", s => s.Computation?.DeductionTotal, "0.00"),
+        Num("CashAdvances/deductions", s => s.Computation?.DeductionTotal, "0.00"),
         Num("SundayDays", s => s.Computation?.SundayDays, "0"),
         Num("SundayPay", s => s.Computation?.SundayPay, "0.00"),
         Num("NetPay", s => s.Computation?.NetPay, "0.00"),
